@@ -1,0 +1,39 @@
+# Assignment brief (third-party document, kept local)
+/PushTalk_Assignment_OCR.md
+/PushTalk*.pdf
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Editor and OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+*.swp
+
+# Machine-local assistant settings
+.claude/settings.local.json
+
+# Node / web
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.vite/
+
+# Python / api
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Logs and local data
+*.log
+data/

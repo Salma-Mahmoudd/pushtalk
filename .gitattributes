@@ -1,0 +1,13 @@
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.pdf binary
+*.png binary
+*.ogg binary
+*.webm binary
+
+# Generated files: collapsed in diffs on GitHub
+specs/**/*.svg linguist-generated
+uv.lock linguist-generated
+pnpm-lock.yaml linguist-generated
+apps/web/src/shared/lib/api/schema.d.ts linguist-generated

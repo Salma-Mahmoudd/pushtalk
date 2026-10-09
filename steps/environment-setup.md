@@ -83,7 +83,7 @@ docker compose version && git --version && node -v && pnpm -v && uv --version
 **Re-rendering** is only needed after editing a `*.puml` source. PlantUML needs Java, so to avoid installing Java it runs inside a Docker container:
 
 ```bash
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work plantuml/plantuml:1.2025.4 -tsvg specs/*/*.puml
+docker run --rm --user "$(id -u):$(id -g)" -e JAVA_TOOL_OPTIONS=-Duser.home=/tmp -v "$PWD":/work -w /work plantuml/plantuml:1.2025.4 -tsvg specs/*/*.puml
 ```
 
 How it works: a container has its own separate file system and cannot see the project folder by default.
@@ -92,6 +92,7 @@ How it works: a container has its own separate file system and cannot see the pr
 | --- | --- |
 | `--rm` | Delete the container when it finishes |
 | `--user "$(id -u):$(id -g)"` | Run as the current user, so the new SVG files belong to that user and not to `root` |
+| `-e JAVA_TOOL_OPTIONS=-Duser.home=/tmp` | Give Java a writable home folder inside the container. That user has no home folder, so without this Java writes a font cache into the repository under a folder named `?` |
 | `-v "$PWD":/work` | Share the current folder (the repository) with the container. Inside the container it appears at `/work`, a name chosen for this command |
 | `-w /work` | Start the container in that shared folder |
 | `plantuml/plantuml:1.2025.4` | The [official PlantUML image](https://hub.docker.com/r/plantuml/plantuml), pinned to the version that rendered the committed SVGs |

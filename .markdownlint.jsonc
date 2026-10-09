@@ -1,0 +1,8 @@
+// Markdown lint rules (markdownlint / markdownlint-cli2 and the VS Code extension)
+{
+  "default": true,
+  // Prose and tables are not wrapped at a fixed width
+  "MD013": false,
+  // Tables use the compact style: "| a | b |" and "| --- | --- |"
+  "MD060": { "style": "compact" }
+}

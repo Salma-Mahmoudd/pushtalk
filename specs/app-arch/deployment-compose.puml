@@ -1,0 +1,54 @@
+@startuml deployment-compose
+title PushTalk — docker compose topology
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam nodesep 40
+skinparam ranksep 55
+top to bottom direction
+
+actor Browser
+
+rectangle "docker compose (network: pushtalk)" {
+  node "**web**\nnginx:alpine\nport 8080" as web
+
+  rectangle "one image built from apps/api (ffmpeg included)" as img {
+    node "**api**\nuvicorn pushtalk.main:app" as api
+    node "**worker**\ncelery worker -Q audio" as worker
+    node "**transcriber**\ncelery worker -Q transcribe\n(image target with faster-whisper)" as transcriber
+    node "**flower**\ncelery flower\nport 5555" as flower
+    node "**migrate** (one-shot)\nalembic upgrade head" as migrate
+  }
+
+  database "**postgres**\npostgres:16-alpine" as pg
+  queue "**redis**\nredis:7-alpine\nappendonly yes" as redis
+  node "**minio**\nS3 storage" as minio
+  node "**minio-init** (one-shot)\ncreates bucket audio" as minioinit
+}
+
+rectangle "volumes" {
+  storage pgdata
+  storage redisdata
+  storage miniodata
+  storage whispermodels
+}
+
+Browser --> web : :8080
+Browser --> flower : :5555
+web --> api : /api, /ws
+img --> pg
+img --> redis
+img --> minio
+minioinit --> minio
+pg --> pgdata
+redis --> redisdata
+minio --> miniodata
+transcriber ..> whispermodels
+
+legend bottom
+  **Start order** (depends_on): postgres, redis, minio healthy → migrate and minio-init finish → api, worker, transcriber, flower → web
+  **Connections:** api, worker and transcriber use postgres, redis and minio; migrate uses postgres; flower uses redis.
+  **whispermodels:** Whisper sizes other than the baked-in base model, downloaded on first use.
+  **docker-compose.dev.yml** adds: bind mounts, uvicorn --reload, Celery restart on change (watchfiles), Vite dev server :5173, minio console :9001.
+endlegend
+@enduml

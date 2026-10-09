@@ -1,0 +1,455 @@
+@startuml class-diagrams-chat-channels
+title Chat — Backend: channels, presence and direct messages (pushtalk.channels, pushtalk.dms)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam classAttributeIconSize 0
+hide empty members
+
+package "pushtalk.channels" {
+  class "router" as channels_router <<APIRouter /api/channels>> {
+    + GET /
+    + POST /
+    + POST /{id}/join
+    + GET /{id}/members
+  }
+  class ChannelService {
+    + create(user, name) : ChannelOut
+    + join(user, channel_id) : None
+    + list(user) : list[ChannelOut]
+    + require_member(user, channel_id) : Channel
+  }
+  class PresenceService {
+    + ttl_s : int = 60
+    + connect(channel_id, user_id, conn_id) : bool
+    + heartbeat(channel_id, user_id, conn_id) : None
+    + disconnect(channel_id, user_id, conn_id) : bool
+    + sweep() : list[(channel_id, user_id)]
+    + online(channel_id) : list[UUID]
+  }
+  class ChannelRepository {
+    + create(name, owner_id) : Channel
+    + list_all() : list[Channel]
+    + get(id) : Channel | None
+    + get_by_dm_key(key) : Channel | None
+    + create_direct(a, b) : Channel  <<ON CONFLICT dm_key>>
+    + list_for_user(user_id, kind) : list[Channel]
+    + add_member(channel_id, user_id) : None
+    + is_member(channel_id, user_id) : bool
+    + list_members(channel_id) : list[User]
+    + next_seq(channel_id) : int  <<UPDATE … RETURNING>>
+  }
+  class Channel <<SQLAlchemy>> {
+    + id : UUID
+    + kind : ChannelKind
+    + name : str | None
+    + dm_key : str | None
+    + created_by : UUID
+    + last_seq : int
+  }
+  class ChannelMember <<SQLAlchemy>> {
+    + channel_id : UUID
+    + user_id : UUID
+    + joined_at : datetime
+  }
+  enum ChannelKind {
+    group
+    direct
+  }
+}
+
+package "pushtalk.dms" {
+  class "router" as dms_router <<APIRouter /api/dms>> {
+    + GET /
+    + POST / {user_id}
+  }
+  class DirectMessageService {
+    + open_dm(user, other_id) : (Channel, created: bool)
+    + list_dms(user) : list[DmOut]
+  }
+}
+
+package "other modules" #EEEEEE {
+  class "users router\n(pushtalk.auth)" as users_router <<APIRouter /api/users?query=>>
+  class "UserRepository\n(pushtalk.auth)" as UserRepository {
+    + search(prefix, exclude_id, limit=20)
+  }
+  class "RateLimiter\n(pushtalk.infra)" as RateLimiter
+  class "EventBus\n(pushtalk.realtime)" as EventBus
+}
+
+channels_router ..> ChannelService
+ChannelService --> ChannelRepository
+ChannelRepository ..> Channel
+ChannelRepository ..> ChannelMember
+Channel --> ChannelKind
+PresenceService --> EventBus : presence.update
+dms_router ..> DirectMessageService
+dms_router ..> RateLimiter
+DirectMessageService --> ChannelRepository
+DirectMessageService --> EventBus : dm.created
+users_router ..> UserRepository
+@enduml
+
+@startuml class-diagrams-chat-messages
+title Chat — Backend: voice message pipeline (pushtalk.messages, worker, transcription, infra)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam classAttributeIconSize 0
+hide empty members
+
+package "pushtalk.messages" {
+  class "router" as messages_router <<APIRouter>> {
+    + POST /api/channels/{id}/messages  (multipart) → 202
+    + GET /api/channels/{id}/messages?after_seq|before_seq
+    + GET /api/messages/{id}/audio  (Range)
+    + GET /api/messages/{id}/receipts  (sender only)
+  }
+  class MessageService {
+    + create_voice_message(user, channel_id, upload, client_msg_id) : MessageOut
+    + history(user, channel_id, after_seq?, before_seq?) : MessagePage
+    + open_audio(user, message_id, range?) : AudioStream
+  }
+  class AudioValidator {
+    + max_bytes : int
+    + allowed_mime : set[str]
+    + validate(path) : ProbeResult
+  }
+  class ReceiptService {
+    + ack(user, message_id, status) : ReceiptSummary
+    + details(user, message_id) : list[RecipientReceipt]
+  }
+  class MessageRepository {
+    + create_processing(...) : Message
+    + get_by_client_id(sender_id, client_msg_id) : Message | None
+    + get(id) : Message | None
+    + list_after(channel_id, after_seq, limit) : list[Message]
+    + list_before(channel_id, before_seq, limit) : list[Message]
+    + mark_ready(id, seq, duration_ms, waveform, audio_key) : None
+    + mark_failed(id, reason) : None
+    + set_transcript(id, text, lang) : None
+    + mark_transcript_failed(id) : None
+  }
+  class ReceiptRepository {
+    + upsert_delivered(message_id, user_id) : None
+    + set_played(message_id, user_id) : None
+    + aggregate(message_id) : ReceiptSummary
+    + list_for_message(message_id) : list[RecipientReceipt]
+  }
+  class Message <<SQLAlchemy>> {
+    + id : UUID
+    + channel_id : UUID
+    + sender_id : UUID
+    + client_msg_id : UUID
+    + status : MessageStatus
+    + seq : int | None
+    + duration_ms : int | None
+    + waveform : list[int] | None
+    + original_key : str
+    + audio_key : str | None
+    + failure_reason : str | None
+    + transcript_status : TranscriptStatus
+    + transcript : str | None
+    + transcript_lang : str | None
+  }
+  class MessageReceipt <<SQLAlchemy>> {
+    + message_id : UUID
+    + user_id : UUID
+    + delivered_at : datetime
+    + played_at : datetime | None
+  }
+  enum MessageStatus {
+    processing
+    ready
+    failed
+  }
+  enum TranscriptStatus {
+    pending
+    done
+    failed
+  }
+}
+
+package "pushtalk.worker" {
+  class celery_app <<Celery>> {
+    broker = REDIS (db 1)
+    acks_late, reject_on_worker_lost
+    prefetch 1; queues audio, transcribe
+  }
+  class process_message <<task, queue audio>> {
+    autoretry transient errors, max_retries=3
+    async code via asyncio.run()
+  }
+  class transcribe_message <<task, queue transcribe>> {
+    max_retries=2, time_limit=120 s
+  }
+}
+
+package "pushtalk.transcription" {
+  interface Transcriber {
+    + transcribe(path) : (text, lang)
+  }
+  class LocalWhisperTranscriber {
+    faster-whisper, WHISPER_MODEL (default base)
+  }
+  class OpenAITranscriber {
+    TRANSCRIBE_PROVIDER=openai, OPENAI_API_KEY
+  }
+  class FakeTranscriber <<test>>
+  class get_transcriber <<factory>>
+}
+
+package "pushtalk.infra" {
+  class ObjectStorage {
+    + put(key, fileobj, content_type) : None
+    + get_stream(key, range?) : AsyncIterator[bytes]
+    + download(key, path) : None
+    + delete(key) : None
+  }
+  class ffmpeg <<module>> {
+    + probe(path) : ProbeResult
+    + transcode_to_opus(src, dst) : None
+    + waveform_peaks(path, buckets=64) : list[int]
+  }
+}
+
+package "other modules" #EEEEEE {
+  class "ChannelService\n(pushtalk.channels)" as ChannelService
+  class "ChannelRepository\n(pushtalk.channels)" as ChannelRepository
+  class "EventBus\n(pushtalk.realtime)" as EventBus
+  class "RateLimiter\n(pushtalk.infra)" as RateLimiter
+}
+
+messages_router ..> MessageService
+messages_router ..> ReceiptService
+messages_router ..> RateLimiter
+MessageService --> ChannelService : require_member
+MessageService --> AudioValidator
+MessageService --> MessageRepository
+MessageService --> ObjectStorage
+MessageService ..> process_message : apply_async
+AudioValidator ..> ffmpeg
+ReceiptService --> ReceiptRepository
+ReceiptService --> EventBus : receipt.updated
+MessageRepository ..> Message
+ReceiptRepository ..> MessageReceipt
+Message --> MessageStatus
+Message --> TranscriptStatus
+celery_app o-- process_message
+celery_app o-- transcribe_message
+process_message --> MessageRepository
+process_message --> ChannelRepository : next_seq
+process_message --> ObjectStorage
+process_message ..> ffmpeg
+process_message --> EventBus : message.ready / failed
+process_message ..> transcribe_message : apply_async
+transcribe_message ..> get_transcriber
+transcribe_message --> EventBus : message.transcribed
+get_transcriber ..> Transcriber
+Transcriber <|.. LocalWhisperTranscriber
+Transcriber <|.. OpenAITranscriber
+Transcriber <|.. FakeTranscriber
+@enduml
+
+@startuml class-diagrams-chat-realtime
+title Chat — Backend: realtime WebSockets (pushtalk.realtime)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam classAttributeIconSize 0
+hide empty members
+
+package "pushtalk.realtime" {
+  class "router" as ws_router <<WebSocket /ws/channels/{id}  +  /ws/me>> {
+    cookie auth + Origin check on handshake
+    catch-up since_seq, ping/pong, receipts,
+    playback.claim
+  }
+  class ConnectionManager {
+    - local : dict[channel_id, set[Connection]]
+    + register(conn) : None
+    + unregister(conn) : None
+    + fan_out(channel_id, event) : None
+    + close_session(sid) : None
+  }
+  class Connection {
+    + websocket : WebSocket
+    + user_id : UUID
+    + session_id : UUID
+    + channel_id : UUID
+    + is_active_player : bool
+    + send(event) : None
+  }
+  class EventBus {
+    redis pub/sub topics ch:{id}, user:{id}
+    + publish(topic, event: WsEvent) : None
+    + subscribe(topic) : AsyncIterator[WsEvent]
+  }
+  class WsEvent <<pydantic, discriminated union>> {
+    + type : str
+    + data : dict
+  }
+}
+
+package "other modules" #EEEEEE {
+  class "PresenceService\n(pushtalk.channels)" as PresenceService
+  class "ReceiptService\n(pushtalk.messages)" as ReceiptService
+  class "MessageRepository\n(pushtalk.messages)" as MessageRepository
+  class "get_ws_user\n(pushtalk.core.deps)" as get_ws_user
+}
+
+ws_router ..> get_ws_user : authenticate
+ws_router ..> ConnectionManager
+ws_router ..> PresenceService : connect / heartbeat
+ws_router ..> ReceiptService : delivered / played
+ws_router ..> MessageRepository : catch-up
+ConnectionManager "1" o-- "*" Connection
+ConnectionManager --> EventBus : subscribe
+EventBus ..> WsEvent
+@enduml
+
+@startuml class-diagrams-chat-frontend
+title Chat — Frontend modules (apps/web/src)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam classAttributeIconSize 0
+hide empty members
+
+package "shared/lib/ws" {
+  class WsClient {
+    - socket : WebSocket | null
+    - attempt : number
+    - lastSeq : () => number
+    + connect(channelId) : void
+    + send(event: ClientEvent) : void
+    + on(type, handler) : Unsubscribe
+    + close() : void
+    - scheduleReconnect() : void
+  }
+  class backoff <<pure fn>> {
+    + nextDelay(attempt, base=500, cap=30000, jitter=0.2) : number
+  }
+}
+
+package "features/voice" {
+  class Recorder {
+    - mediaRecorder : MediaRecorder
+    + start() : Promise<void>
+    + stop() : Promise<Blob & {durationMs}>
+    + cancel() : void
+  }
+  class PlaybackQueue <<pure, no DOM>> {
+    - items : QueueItem[]  // sorted by seq
+    - state : Locked|Idle|Loading|Playing|Suspended
+    - seen : Set<seq>
+    + enqueue(msg: ReadyMessage) : void
+    + unlock() : void
+    + recordingStarted() : void
+    + recordingStopped() : void
+    + onEnded() : void
+    + setRate(rate) : void
+    + setActive(active: boolean) : void
+    + current() : QueueItem | null
+  }
+  interface AudioPlayer {
+    + play(src, rate) : Promise<void>
+    + preload(src) : void
+    + setRate(rate) : void
+    + pause() : void
+    + resume() : void
+    + onEnded(cb) : void
+    + onError(cb) : void
+  }
+  class HtmlAudioPlayer {
+    two HTMLAudioElements: current + preloaded next;
+    src = /api/messages/{id}/audio (cookie auth)
+  }
+  class FakeAudioPlayer <<test>>
+  class playbackOwnership <<module>> {
+    sends playback.claim on focus;
+    playback.released → setActive(false)
+  }
+  class settingsStore <<zustand + persist>> {
+    + playbackRate : 1 | 1.5 | 2
+    + setPlaybackRate(r) : void
+  }
+  class PttButton <<component>>
+  class AudioUnlockBanner <<component>>
+  class PlayHereButton <<component>>
+  class SpeedControl <<component>> {
+    1× / 1.5× / 2×
+  }
+}
+
+package "features/channels" {
+  class channelsApi <<module>> {
+    + list() / create(name) / join(id) / members(id)
+  }
+  class messageStore <<zustand>> {
+    + byChannel : Record<id, Message[]>
+    + lastSeq(channelId) : number
+    + upsert(msgs) : void
+    + setStatus(id, status) : void
+    + setReceipts(id, summary) : void
+  }
+  class presenceStore <<zustand>> {
+    + online : Record<channelId, Set<userId>>
+  }
+  class ChannelListPage <<component>>
+  class ChannelRoom <<component>>
+  class MemberList <<component>>
+  class MessageList <<component>>
+  class MessageBubble <<component>> {
+    status, waveform, duration, n/m receipts, transcript
+  }
+  class ReceiptDetails <<component>> {
+    per-recipient delivered / played times
+  }
+  class TranscriptView <<component>> {
+    pending spinner | text | "unavailable"
+  }
+}
+
+package "features/dms" {
+  class dmsApi <<module>> {
+    + list() / open(userId) / searchUsers(q)
+  }
+  class userEventsClient <<WsClient on /ws/me>> {
+    dm.created → refresh DM list
+  }
+  class DirectList <<component>>
+  class UserPicker <<component>>
+}
+
+AudioPlayer <|.. HtmlAudioPlayer
+AudioPlayer <|.. FakeAudioPlayer
+PlaybackQueue --> AudioPlayer
+PlaybackQueue ..> settingsStore : playbackRate
+playbackOwnership ..> PlaybackQueue : setActive
+playbackOwnership ..> WsClient : playback.claim
+PlayHereButton ..> playbackOwnership
+SpeedControl ..> settingsStore
+ChannelRoom *-- SpeedControl
+ChannelRoom *-- PlayHereButton
+MessageBubble *-- TranscriptView
+MessageBubble ..> ReceiptDetails : on click (own msgs)
+DirectList ..> dmsApi
+UserPicker ..> dmsApi
+userEventsClient ..> dmsApi
+userEventsClient ..> backoff
+WsClient ..> backoff
+ChannelRoom --> WsClient
+ChannelRoom --> PlaybackQueue
+ChannelRoom *-- MessageList
+ChannelRoom *-- MemberList
+ChannelRoom *-- PttButton
+ChannelRoom *-- AudioUnlockBanner
+MessageList *-- MessageBubble
+PttButton --> Recorder
+PttButton ..> PlaybackQueue : recordingStarted/Stopped
+WsClient ..> messageStore
+WsClient ..> presenceStore
+ChannelListPage ..> channelsApi
+@enduml

@@ -1,0 +1,336 @@
+@startuml uml-diagrams-voice-pipeline
+title Chat — Voice message pipeline: record → upload → process → broadcast (sequence)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+autonumber
+
+actor Sender
+participant "PttButton +\nRecorder" as rec
+participant "ApiClient" as client
+participant "messages router\nPOST /api/channels/{id}/messages" as router
+participant "MessageService" as svc
+participant "RateLimiter\n(redis)" as rl
+participant "AudioValidator\n(magic bytes + ffprobe)" as val
+participant "Storage\n(MinIO)" as s3
+database postgres as db
+queue "redis\nCelery queue: audio" as q
+participant "worker\nprocess_message" as worker
+queue "redis pub/sub\nch:{channel_id}" as ps
+participant "WS hub\n(every api instance)" as hub
+actor Recipient
+
+Sender -> rec : press & hold
+rec -> rec : MediaRecorder.start()\n(audio/webm;codecs=opus)
+Sender -> rec : release
+rec -> rec : stop; local duration < 0.5 s → discard (UX only)
+rec -> client : upload(blob, client_msg_id)
+client -> router : multipart: file, client_msg_id
+router -> router : membership check (403)\nContent-Length ≤ MAX_UPLOAD_BYTES (413)
+router -> rl : hit("upload", user.id)  20 / min, 200 / day
+alt over limit
+  router --> client : 429 {error:{code:"rate_limited"}} + Retry-After
+  client --> Sender : bubble "slow down, retry in Ns"
+end
+router -> svc : create_voice_message(user, channel, file)
+svc -> val : validate(file)
+val -> val : sniff magic bytes → allowed MIME\n(webm / ogg / mp4 / wav)
+val -> val : ffprobe → real duration
+alt invalid MIME / size / duration ∉ [0.5 s, 60 s]
+  svc --> router : raise InvalidAudio(code)
+  router --> client : 422 {error:{code:"invalid_audio", message}}
+  client --> Sender : show failed bubble
+else valid
+  svc -> s3 : put originals/{id}
+  svc -> db : INSERT messages(status=processing)\nON CONFLICT (sender_id, client_msg_id) → return existing
+  svc -> q : process_message.apply_async(id, queue="audio")\n(after the INSERT is committed)
+  router --> client : 202 {id, status:"processing"}
+  client --> Sender : bubble "sending…"
+end
+
+q -> worker : process_message(id)  (acks_late: redelivered if the worker dies)
+worker -> db : SELECT ... status must be processing (idempotent)
+worker -> s3 : get originals/{id}
+worker -> worker : ffmpeg → Opus/OGG mono 48 kHz 32 kbps
+worker -> worker : ffprobe duration;\ndecode PCM → 64 waveform peaks
+alt ffmpeg / probe error (non-retryable)
+  worker -> db : UPDATE status=failed, failure_reason
+  worker -> ps : publish message.failed {id}
+  ps -> hub
+  hub -> client : message.failed (sender connections only)
+  client --> Sender : bubble "failed" + retry
+else transient error (S3/DB down)
+  worker -> q : Celery autoretry, exponential backoff (max_retries=3)\nthen → failed path
+else success
+  worker -> s3 : put processed/{id}.ogg
+  worker -> db : BEGIN\nUPDATE channels SET last_seq=last_seq+1 RETURNING last_seq\nUPDATE messages SET status=ready, seq, duration_ms, waveform,\n  transcript_status=pending\nCOMMIT
+  worker -> s3 : delete originals/{id}  (processed copy is the source of truth)
+  worker -> q : transcribe_message.apply_async(id, queue="transcribe")\n(see transcription diagram — never delays broadcast)
+  worker -> ps : publish message.ready {id, seq, sender, duration_ms, waveform}
+  ps -> hub
+  hub -> client : message.ready → sender: status "sent"
+  hub -> Recipient : message.ready → enqueue for autoplay
+end
+@enduml
+
+@startuml uml-diagrams-reconnect-catchup
+title Chat — WebSocket connect, catch-up and reconnect with backoff (sequence)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+autonumber
+
+participant "ChannelRoom" as room
+participant "WsClient" as ws
+participant "messageStore" as store
+participant "WS endpoint\n/ws/channels/{id}" as ep
+participant "ConnectionManager" as cm
+queue "redis pub/sub" as ps
+database postgres as db
+participant "PresenceService\n(redis)" as pres
+
+room -> ws : connect(channelId)
+ws -> store : since = lastSeq(channelId)  (0 on first load)
+ws -> ep : open ?since_seq=since  (pt_access cookie + Origin)
+ep -> ep : auth (4401) + membership (4403)
+ep -> cm : register(conn)
+cm -> ps : SUBSCRIBE ch:{id} (first local conn)
+note right
+  Subscribe BEFORE reading the DB so nothing
+  published in between is lost; client de-dupes by seq.
+end note
+ep -> pres : ZADD presence:{id} now "{user}:{conn}"
+pres -> ps : publish presence.update (if user went offline→online)
+ep -> db : SELECT ready messages WHERE seq > since ORDER BY seq LIMIT 200
+ep -> ws : catchup {messages[], has_more}
+ws -> store : upsert by seq; lastSeq = max
+alt has_more
+  ws -> ep : GET /api/channels/{id}/messages?after_seq=... (REST paging)
+end
+ep -> ws : presence.snapshot {online_user_ids}
+loop every ping (25 s)
+  ws -> ep : ping
+  ep -> pres : ZADD presence:{id} now "{user}:{conn}" (heartbeat)
+  ep -> ws : pong
+end
+ps -> ep : live events
+ep -> ws : message.ready {seq}
+alt seq == lastSeq + 1
+  ws -> store : append
+else seq <= lastSeq
+  ws -> ws : duplicate → ignore
+else seq > lastSeq + 1 (gap)
+  ws -> ep : REST fetch after_seq=lastSeq → fill gap, then append
+end
+
+== connection drop ==
+ws -> ws : onclose: 4403 → stop; 4401 → refreshSession() once;\nanything else → reconnect
+loop attempt n = 0,1,2,…
+  ws -> ws : wait min(30 s, 0.5 s·2^n) ± 20 % jitter
+  ws -> ep : reopen ?since_seq=lastSeq
+  alt open ok
+    ws -> ws : n = 0  (catch-up as above)
+  end
+end
+ep -> pres : on disconnect ZREM "{user}:{conn}" → presence.update if user's last conn
+note over pres
+  Crash safety: a sweeper task in every api process runs every 30 s:
+  ZREMRANGEBYSCORE presence:* −inf (now − 60 s) and publishes
+  presence.update for users that dropped to zero connections.
+end note
+note over ws : also reconnect immediately on window "online" event\nand app-level ping every 25 s (server closes idle at 60 s)
+@enduml
+
+@startuml uml-diagrams-playback-receipts
+title Chat — Recipient autoplay queue and receipts (sequence)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+autonumber
+
+actor Recipient
+participant "WsClient" as ws
+participant "PlaybackQueue" as pq
+participant "settingsStore\n(playbackRate)" as settings
+participant "audio API\nGET /api/messages/{id}/audio" as api
+participant "AudioPlayer\n(HTMLAudioElement)" as player
+participant "WS endpoint" as ep
+database postgres as db
+actor Sender
+
+ws -> pq : enqueue(msg) [skip if msg.sender == me]
+ws -> ep : receipt {message_id, status:"delivered"}
+ep -> db : UPSERT message_receipts(delivered_at)
+ep -> Sender : receipt.updated {message_id, delivered:n, played:k, total:m}
+
+alt audio not unlocked (no user gesture yet)
+  pq -> pq : hold; UI shows "Tap to enable audio" banner
+  Recipient -> pq : tap → unlock() (play silent clip, resume AudioContext)
+else recording in progress
+  pq -> pq : message received and queued, autoplay held\n(half-duplex); playback resumes on release
+end
+
+pq -> player : play(src = /api/messages/{id}/audio,\nrate = settings.playbackRate)\n(1× / 1.5× / 2×, preservesPitch = true)
+player -> api : GET (pt_access cookie sent automatically;\nnext item preloaded on a second element)
+api -> api : membership check → 404 if not member
+api --> player : 200 audio/ogg, streamed from MinIO\n(Range supported, so seeking works)
+alt error (e.g. access token expired)
+  player --> pq : error
+  pq -> pq : refreshSession(), retry this item once;\nthen skip it
+end
+player --> pq : ended
+pq -> ws : markPlayed(msg.id)
+ws -> ep : receipt {message_id, status:"played"}
+ep -> db : UPDATE played_at (idempotent)
+ep -> Sender : receipt.updated
+pq -> pq : next item (strict seq order, one at a time)
+
+Recipient -> settings : choose 1.5×
+settings -> pq : setRate(1.5) → applies to current item immediately\nand to every following item (persisted in localStorage)
+
+note over pq
+  Two tabs or devices: only connections open on this channel are
+  candidates. The most recently focused one sends playback.claim and
+  plays; the others mark items delivered, stay silent and show
+  "▶ play here", which sends playback.claim from that tab.
+end note
+@enduml
+
+@startuml uml-diagrams-message-states
+title Chat — Message lifecycle (state machine)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+
+state "Server status (messages.status)" as server {
+  [*] --> processing : upload validated\n(202 returned)
+  processing --> ready : worker success\n(seq assigned)
+  processing --> failed : invalid audio /\nretries exhausted
+  failed --> [*]
+  ready --> [*]
+}
+
+state "Sender-visible status" as sender {
+  [*] --> uploading
+  uploading --> sending : 202
+  uploading --> failed_s : 4xx / network error
+  sending --> sent : message.ready
+  sending --> failed_s : message.failed
+  sent --> delivered : ≥1 delivered receipt
+  delivered --> played : ≥1 played receipt\n(shows n/m)
+  state "failed" as failed_s
+}
+@enduml
+
+@startuml uml-diagrams-playback-queue-states
+title Chat — PlaybackQueue (client state machine)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+
+[*] --> Locked
+Locked --> Idle : unlock() (user gesture)
+Idle --> Loading : enqueue() & !recording
+Loading --> Playing : audio can play
+Loading --> Idle : load error\n(skip, mark failed locally)
+Playing --> Idle : ended & queue empty
+Playing --> Loading : ended & queue not empty
+Idle --> Suspended : recordingStarted()
+Playing --> Suspended : recordingStarted()\n(pause; resume same item)
+Suspended --> Playing : recordingStopped() & paused item\n(resume it)
+Suspended --> Idle : recordingStopped() & queue empty
+Suspended --> Loading : recordingStopped() & queue not empty
+Locked --> Locked : enqueue() (buffer)
+
+note right of Playing
+  invariant: at most one item playing
+  items ordered by seq, own messages never enqueued
+  duplicate seq ignored
+  setRate(r) allowed in every state; applied to current + next items
+end note
+@enduml
+
+@startuml uml-diagrams-transcription
+title Chat — Server-side transcription (second worker step, sequence)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+autonumber
+
+participant "worker\nprocess_message" as w1
+queue "redis\nCelery queue: transcribe" as tq
+participant "transcriber\ntranscribe_message" as tr
+participant "Transcriber provider\nlocal: faster-whisper (default;\nWHISPER_MODEL, base baked in)\nopenai: optional, OPENAI_API_KEY" as model
+participant "Storage (MinIO)" as s3
+database postgres as db
+queue "redis pub/sub\nch:{channel_id}" as ps
+participant "WS hub" as hub
+actor "Channel members" as members
+
+w1 -> tq : enqueue transcribe_message(id)\n(after message.ready is published)
+tq -> tr : transcribe_message(id)
+tr -> db : SELECT … transcript_status must be pending (idempotent)
+tr -> s3 : get processed/{id}.ogg
+tr -> model : transcribe(path) → text, language
+alt success
+  tr -> db : UPDATE transcript, transcript_lang, transcript_status=done
+  tr -> ps : publish message.transcribed {id, transcript, lang}
+else provider error / time limit (120 s)
+  tr -> tq : Celery retry (max_retries=2)
+  tr -> db : last try → transcript_status=failed
+  tr -> ps : publish message.transcribed {id, status:"failed"}
+end
+ps -> hub
+hub -> members : message.transcribed → bubble shows text (or "transcript unavailable")
+
+note over tr
+  Separate compose service + queue so slow CPU inference
+  never blocks audio processing or delivery.
+  Catch-up / history responses include transcript fields.
+end note
+@enduml
+
+@startuml uml-diagrams-direct-messages
+title Chat — Direct messages (sequence)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+autonumber
+
+actor Alice
+participant "UserPicker /\nDirectList" as ui
+participant "ApiClient" as client
+participant "dms router\n/api/dms" as router
+participant "RateLimiter" as rl
+participant "DirectMessageService" as svc
+participant "ChannelRepository" as repo
+database postgres as db
+queue "redis pub/sub\nuser:{id}" as ups
+actor Bob
+
+Alice -> ui : search "bob"
+ui -> client : GET /api/users?query=bob
+client --> ui : [{id, username, online}]
+Alice -> ui : pick Bob
+ui -> client : POST /api/dms {user_id: bob}
+client -> router
+router -> rl : hit("dm_create", alice)  10 / min
+router -> svc : open_dm(alice, bob)
+svc -> svc : reject self-DM (422) / unknown user (404)
+svc -> repo : get_by_dm_key(min:max)
+alt exists
+  repo --> svc : channel
+  router --> client : 200 {channel}
+else new
+  svc -> db : INSERT channels(kind=direct, dm_key)\nINSERT channel_members ×2\nON CONFLICT (dm_key) DO NOTHING → re-select (race-safe)
+  svc -> ups : publish dm.created to user:{bob}
+  ups -> Bob : dm.created → appears in Bob's DM list
+  router --> client : 201 {channel}
+end
+ui -> ui : navigate /channels/{id}
+note over ui, Bob
+  From here a DM is just a channel: same WS endpoint, voice pipeline,
+  ordering, playback queue, receipts and transcription.
+  POST /api/channels/{id}/join → 403 for kind=direct (membership fixed at 2).
+end note
+@enduml

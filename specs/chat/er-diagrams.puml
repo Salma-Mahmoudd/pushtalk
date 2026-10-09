@@ -1,0 +1,109 @@
+@startuml er-diagrams-chat
+title Chat — ER diagram
+
+hide circle
+skinparam linetype ortho
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+
+entity "users\n(owned by auth)" as users #EEEEEE {
+  * id : uuid <<PK>>
+  --
+  * username : varchar(32)
+}
+
+entity "channels" as channels {
+  * id : uuid <<PK>>
+  --
+  * kind : channel_kind
+    -- group | direct
+    name : varchar(64)
+    -- required + UNIQUE for group; NULL for direct
+    dm_key : varchar(73) <<UNIQUE>>
+    -- direct only: "{min(user_a,user_b)}:{max(...)}"
+    -- guarantees one DM channel per user pair
+  * created_by : uuid <<FK users.id>>
+  * last_seq : bigint default 0
+    -- per-channel sequence counter
+  * created_at : timestamptz
+  --
+  CHECK (kind='group' AND name IS NOT NULL
+      OR kind='direct' AND dm_key IS NOT NULL)
+}
+
+entity "channel_members" as members {
+  * channel_id : uuid <<PK, FK channels.id>>
+  * user_id : uuid <<PK, FK users.id>>
+  --
+  * joined_at : timestamptz
+}
+
+entity "messages" as messages {
+  * id : uuid <<PK>>
+  --
+  * channel_id : uuid <<FK channels.id>>
+  * sender_id : uuid <<FK users.id>>
+  * client_msg_id : uuid
+    -- idempotency key from the browser
+  * status : message_status
+    -- processing | ready | failed
+    seq : bigint
+    -- NULL until ready; assigned by worker
+  * mime_type : varchar(64)
+    -- sniffed server-side
+  * size_bytes : int
+    duration_ms : int
+    -- from ffprobe, never from client
+    waveform : jsonb
+    -- int[] peaks 0..100 (e.g. 64 buckets)
+  * original_key : text
+    -- s3 key originals/{id}
+    audio_key : text
+    -- s3 key processed/{id}.ogg
+    failure_reason : varchar(64)
+  * transcript_status : transcript_status
+    -- pending | done | failed (set when ready)
+    transcript : text
+    transcript_lang : varchar(8)
+  * created_at : timestamptz
+    ready_at : timestamptz
+  --
+  UNIQUE (channel_id, seq)
+  UNIQUE (sender_id, client_msg_id)
+  INDEX (channel_id, seq) WHERE status='ready'
+}
+
+entity "message_receipts" as receipts {
+  * message_id : uuid <<PK, FK messages.id>>
+  * user_id : uuid <<PK, FK users.id>>
+  --
+  * delivered_at : timestamptz
+    played_at : timestamptz
+}
+
+users ||--o{ channels : creates
+channels ||--o{ members : has
+users ||--o{ members : joins
+channels ||--o{ messages : contains
+users ||--o{ messages : sends
+messages ||--o{ receipts : "tracked by"
+users ||--o{ receipts : acknowledges
+
+note right of receipts
+  Row created on first "delivered" ack;
+  played_at set on "played" ack.
+  Sender sees BOTH views:
+  • aggregated on the bubble: delivered n/m, played n/m
+    (m = members − sender)
+  • per-recipient list on click:
+    GET /api/messages/{id}/receipts
+end note
+
+note bottom of channels
+  Ephemeral state lives in Redis, not Postgres:
+  presence:{channel_id}  ZSET  member "{user_id}:{conn_id}", score = last heartbeat
+    online = users with a member scored > now − 60 s (multi-tab + crash safe:
+    a dead api pod stops heart-beating, its entries expire on their own)
+  ratelimit:{scope}:{key}  sliding-window counters (upload, login, signup, dm)
+end note
+@enduml

@@ -1,0 +1,198 @@
+@startuml class-diagrams-auth-backend
+title Auth — Backend classes (apps/api, package pushtalk)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam classAttributeIconSize 0
+
+package "pushtalk.core" {
+  class Settings <<pydantic-settings>> {
+    + database_url : str
+    + jwt_secret : SecretStr
+    + jwt_algorithm : str = "HS256"
+    + access_token_ttl_min : int = 15
+    + refresh_token_ttl_days : int = 7
+    + refresh_reuse_grace_s : int = 10
+    + cookie_secure : bool = True
+    + allowed_origins : list[str]
+  }
+  class security <<module>> {
+    + hash_password(pw: str) : str
+    + verify_password(pw: str, hash: str) : bool
+    + create_access_token(user_id: UUID, sid: UUID) : str
+    + decode_access_token(token: str) : AccessClaims
+    + new_refresh_token() : str
+    + hash_refresh_token(token: str) : str
+    + set_auth_cookies(resp, tokens) : None
+    + clear_auth_cookies(resp) : None
+  }
+  class OriginCheckMiddleware {
+    rejects unsafe methods and WS handshakes
+    whose Origin is not in allowed_origins (403)
+  }
+  class AppError {
+    + code : str
+    + message : str
+    + status_code : int
+  }
+  class Unauthorized
+  class CsrfFailed
+  class RateLimited {
+    + retry_after_s : int
+  }
+  class deps <<module>> {
+    + get_session() : AsyncSession
+    + get_current_user(pt_access cookie) : User
+    + get_ws_user(websocket) : WsPrincipal
+  }
+}
+
+package "pushtalk.infra" {
+  class RateLimiter <<shared with chat>> {
+    + hit(scope, key) : None
+  }
+}
+
+package "pushtalk.auth" {
+  class "models" as auth_models <<SQLAlchemy>> {
+    User { id, username, password_hash, created_at }
+    RefreshToken { id, user_id, family_id, token_hash,
+      created_at, expires_at, rotated_at,
+      replaced_by_id, revoked_at, user_agent, ip }
+  }
+  class "schemas" as auth_schemas <<pydantic>> {
+    SignupIn { username: constr(3..32, ^[a-zA-Z0-9_]+$),
+      password: constr(8..128) }
+    LoginIn { username, password }
+    UserOut { id, username }
+    SessionOut { user: UserOut, access_expires_at }
+    AccessClaims { sub, sid, exp, iat }
+  }
+  class UsernameTaken
+  class InvalidCredentials
+  class RefreshInvalid
+  class UserRepository {
+    - session : AsyncSession
+    + get(id: UUID) : User | None
+    + get_by_username(username: str) : User | None
+    + create(username: str, password_hash: str) : User
+  }
+  class RefreshTokenRepository {
+    - session : AsyncSession
+    + add(token: RefreshToken) : None
+    + get_by_hash(token_hash: str) : RefreshToken | None
+    + mark_rotated(old: RefreshToken, new: RefreshToken) : None
+    + revoke_family(family_id: UUID) : None
+  }
+  class AuthService {
+    - users : UserRepository
+    - tokens : RefreshTokenRepository
+    - events : EventBus
+    + signup(data: SignupIn, client: ClientInfo) : IssuedSession
+    + login(data: LoginIn, client: ClientInfo) : IssuedSession
+    + refresh(raw_token: str) : IssuedSession
+    + logout(raw_token: str) : None
+  }
+  class "router" as auth_router <<APIRouter /api/auth>> {
+    + POST /signup(SignupIn) : 201 SessionOut + cookies
+    + POST /login(LoginIn) : 200 SessionOut + cookies
+    + POST /refresh() : 200 SessionOut + rotated cookies
+    + POST /logout() : 204, cookies cleared
+    + GET /me() : SessionOut
+  }
+}
+
+AppError <|-- Unauthorized
+AppError <|-- CsrfFailed
+AppError <|-- RateLimited
+AppError <|-- UsernameTaken
+AppError <|-- InvalidCredentials
+AppError <|-- RefreshInvalid
+OriginCheckMiddleware ..> CsrfFailed : raises
+auth_router ..> RateLimiter
+RateLimiter ..> RateLimited : raises
+
+auth_router ..> AuthService
+auth_router ..> deps
+auth_router ..> security : cookies
+AuthService --> UserRepository
+AuthService --> RefreshTokenRepository
+AuthService ..> security
+deps ..> security
+deps ..> UserRepository
+UserRepository ..> auth_models
+RefreshTokenRepository ..> auth_models
+auth_router ..> auth_schemas
+security ..> Settings
+@enduml
+
+@startuml class-diagrams-auth-frontend
+title Auth — Frontend modules (apps/web/src)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam classAttributeIconSize 0
+
+package "shared/lib/api" {
+  class ApiClient {
+    - baseUrl : string
+    - refreshing : Promise<void> | null
+    + request<T>(path, init) : Promise<T>
+    + refreshSession() : Promise<void>
+    + onSessionLost(cb) : void
+  }
+  class ApiError {
+    + status : number
+    + code : string
+    + message : string
+    + details? : FieldError[]
+  }
+}
+
+package "features/auth" {
+  class authApi <<module>> {
+    + signup(username, password) : Promise<Session>
+    + login(username, password) : Promise<Session>
+    + refresh() : Promise<Session>
+    + logout() : Promise<void>
+    + me() : Promise<Session>
+  }
+  class authStore <<zustand>> {
+    + status : "unknown" | "authenticated" | "anonymous"
+    + user : User | null
+    + accessExpiresAt : number | null
+    + setSession(s: Session) : void
+    + clear() : void
+  }
+  class sessionSync <<module>> {
+    BroadcastChannel "auth": shares accessExpiresAt
+    and logout between tabs
+    navigator.locks "pt-refresh": one refresh at a time
+    timer: refresh at accessExpiresAt − 60 s
+  }
+  class LoginPage <<component>>
+  class SignupPage <<component>>
+  class RequireAuth <<component>> {
+    status unknown → spinner (GET /me on load)
+    anonymous → redirect /login
+  }
+}
+
+note bottom of ApiClient
+  credentials: "same-origin"; tokens live only in
+  httpOnly cookies and are never read by JavaScript.
+  On 401: one shared refreshSession(), then one retry.
+end note
+
+ApiClient ..> ApiError : throws
+authApi --> ApiClient
+LoginPage ..> authApi
+SignupPage ..> authApi
+LoginPage ..> authStore
+SignupPage ..> authStore
+RequireAuth ..> authStore
+RequireAuth ..> authApi : me()
+sessionSync ..> authStore
+sessionSync ..> ApiClient : refreshSession()
+ApiClient ..> authStore : clear() when refresh fails
+@enduml

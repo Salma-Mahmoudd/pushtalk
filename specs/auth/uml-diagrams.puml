@@ -1,0 +1,150 @@
+@startuml uml-diagrams-signup-login
+title Auth — Sign up & log in (sequence)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+autonumber
+
+actor User
+participant "LoginPage /\nSignupPage" as ui
+participant "authStore\n(zustand)" as store
+participant "ApiClient" as client
+participant "OriginCheck\nmiddleware" as csrf
+participant "auth router\nPOST /api/auth/*" as router
+participant "RateLimiter\n(redis)" as rl
+participant "AuthService" as svc
+participant "UserRepository /\nRefreshTokenRepository" as repo
+participant "security\n(hash, JWT, cookies)" as sec
+database postgres as db
+
+== Sign up ==
+User -> ui : username + password
+ui -> ui : client-side form validation\n(UX only, not trusted)
+ui -> client : signup(username, password)
+client -> csrf : POST /api/auth/signup {username, password}
+csrf -> csrf : Origin ∈ ALLOWED_ORIGINS?
+alt foreign origin
+  csrf --> client : 403 {error:{code:"csrf_failed"}}
+end
+csrf -> router
+router -> rl : hit("signup_ip", ip)  5 / hour
+alt over limit
+  router --> client : 429 {error:{code:"rate_limited"}} + Retry-After
+end
+router -> router : Pydantic SignupIn validation\n(len, charset, password ≥ 8)
+alt invalid body
+  router --> client : 422 {error:{code:"validation_error", details[]}}
+else valid
+  router -> svc : signup(dto, user_agent, ip)
+  svc -> repo : get_by_username(lower(username))
+  repo -> db : SELECT
+  alt username taken
+    svc --> router : raise UsernameTaken
+    router --> client : 409 {error:{code:"username_taken"}}
+  else free
+    svc -> sec : hash_password(pw)
+    svc -> repo : create user
+    repo -> db : INSERT users
+    svc -> svc : start_session(user)\nnew family_id, opaque refresh token
+    svc -> repo : insert refresh_tokens(sha256(token))
+    svc -> sec : create_access_token(sub, sid=family_id)
+    svc --> router : SessionOut + tokens
+    router -> sec : set_auth_cookies(response)
+    router --> client : 201 {user, access_expires_at}\nSet-Cookie: pt_access (HttpOnly, SameSite=Strict, Path=/)\nSet-Cookie: pt_refresh (HttpOnly, SameSite=Strict, Path=/api/auth)
+    client -> store : setSession(user, accessExpiresAt)
+    store -> store : schedule refresh at expiry − 60 s
+    ui --> User : redirect /channels
+  end
+end
+
+== Log in ==
+User -> ui : username + password
+ui -> client : login(username, password)
+client -> router : POST /api/auth/login (Origin checked)
+router -> rl : hit("login", username) 10 / 15 min\nhit("login_ip", ip) 30 / 15 min
+alt over limit
+  router --> client : 429 {error:{code:"rate_limited"}} + Retry-After
+  ui --> User : "Too many attempts, try again in N s"
+end
+router -> svc : login(dto, user_agent, ip)
+svc -> repo : get_by_username(lower(username))
+repo -> db : SELECT
+svc -> sec : verify_password(pw, hash)\n(constant-time; dummy hash if user missing)
+alt bad credentials
+  router --> client : 401 {error:{code:"invalid_credentials"}}
+  note right : same error for unknown user\nand wrong password
+else ok
+  svc -> svc : start_session(user)
+  router --> client : 200 {user, access_expires_at} + both cookies
+  client -> store : setSession(user, accessExpiresAt)
+end
+@enduml
+
+@startuml uml-diagrams-authenticated-request
+title Auth — Authenticated request, refresh rotation & WebSocket handshake (sequence)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+autonumber
+
+participant "SPA\n(one of several tabs)" as spa
+participant "ApiClient" as client
+participant "Web Locks API\n'pt-refresh'" as lock
+participant "FastAPI\nget_current_user()" as dep
+participant "auth router\n/api/auth/refresh" as router
+participant "AuthService" as svc
+database postgres as db
+participant "WS endpoint\n/ws/channels/{id}" as ws
+
+== REST (cookie sent automatically) ==
+spa -> client : request(...)
+client -> dep : GET /api/...\nCookie: pt_access=<jwt>
+dep -> dep : decode JWT (signature, exp)
+alt valid
+  dep -> dep : load user(sub)
+  dep --> client : 2xx from handler
+else missing / expired
+  dep --> client : 401 {error:{code:"unauthorized"}}
+  client -> client : refreshSession() — single flight\n(one refresh shared by all waiting requests)
+end
+
+== Refresh (proactive at expiry − 60 s, or after a 401) ==
+client -> lock : request("pt-refresh")
+note right of lock
+  Only one tab refreshes at a time.
+  A tab that waited checks accessExpiresAt
+  (shared via BroadcastChannel) and skips
+  the call if another tab already refreshed.
+end note
+client -> router : POST /api/auth/refresh\nCookie: pt_refresh=<opaque>
+router -> svc : rotate(token)
+svc -> db : SELECT refresh_tokens WHERE token_hash = sha256(token)
+alt unknown, expired or revoked
+  router --> client : 401 refresh_invalid + clear cookies
+  client -> spa : authStore.clear() → /login
+else already rotated, outside 10 s grace (reuse = likely theft)
+  svc -> db : UPDATE family SET revoked_at = now()
+  router --> client : 401 refresh_invalid + clear cookies
+else valid (or rotated within grace: lost response, retry)
+  svc -> db : mark rotated_at, replaced_by_id;\nINSERT new token (same family_id)
+  router --> client : 200 {access_expires_at}\n+ new pt_access, new pt_refresh
+  client -> client : retry the original request once
+end
+
+== WebSocket (cookie sent on the handshake) ==
+spa -> ws : WS /ws/channels/{id}?since_seq=N\nCookie: pt_access · Origin
+ws -> ws : Origin allowed? decode JWT
+alt bad origin, missing or expired token
+  ws --> spa : close(4401, "unauthorized")
+  spa -> client : refreshSession() once, then reconnect;\nif refresh fails → /login
+else not a member of channel
+  ws --> spa : close(4403, "forbidden") — no reconnect
+else ok
+  ws --> spa : accept → catch-up + live events
+  note over ws
+    The open socket is not closed when the access token
+    expires. Logout publishes session.revoked {sid} on
+    user:{id}; sockets of that session close with 4401.
+  end note
+end
+@enduml

@@ -1,0 +1,47 @@
+@startuml system-architecture
+title PushTalk — System Architecture (overview; detailed flows are in the sequence diagrams)
+
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam nodesep 70
+skinparam ranksep 60
+top to bottom direction
+
+actor "User\n(Chrome)" as user
+
+rectangle "**Browser — React SPA**\nRecorder · PlaybackQueue · WsClient · ApiClient" as spa
+
+node "**web** (nginx)\nserves the built app\nproxies /api and /ws" as web
+
+node "**api** (FastAPI)\nauth · channels · messages · dms\nWebSockets · presence · rate limits" as api
+
+queue "**redis**\nCelery broker · pub/sub\npresence · rate-limit counters" as redis
+
+node "**worker**\nCelery, queue audio\nffmpeg → Opus/OGG, waveform" as worker
+node "**transcriber**\nCelery, queue transcribe\nfaster-whisper or OpenAI" as transcriber
+node "**flower**\nCelery dashboard :5555" as flower
+
+database "**postgres**\nusers · channels\nmessages · receipts" as pg
+storage "**minio** (S3)\naudio files" as minio
+
+user --> spa
+spa --> web : HTTP + WebSocket\n(httpOnly cookies)
+web --> api : proxy
+api --> redis : enqueue tasks\nsubscribe to events
+redis --> worker : tasks
+redis --> transcriber : tasks
+flower --> redis : monitor
+api --> pg
+api --> minio
+worker --> pg
+worker --> minio
+transcriber --> pg
+transcriber --> minio
+
+note right of redis
+  Workers also publish events here
+  (message.ready / failed / transcribed);
+  every api instance relays them to
+  its WebSocket clients.
+end note
+@enduml

@@ -1,0 +1,68 @@
+@startuml er-diagrams-auth
+title Auth — ER diagram
+
+hide circle
+skinparam linetype ortho
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+
+entity "users" as users {
+  * id : uuid <<PK>> default gen_random_uuid()
+  --
+  * username : varchar(32) <<UNIQUE>>
+    -- stored lowercased, ^[a-z0-9_]{3,32}$
+  * password_hash : varchar(255)
+    -- argon2id via pwdlib
+  * created_at : timestamptz default now()
+}
+
+entity "refresh_tokens" as rt {
+  * id : uuid <<PK>>
+  --
+  * user_id : uuid <<FK users.id>> ON DELETE CASCADE
+  * family_id : uuid
+    -- one family per login (= session id, "sid" claim)
+  * token_hash : char(64) <<UNIQUE>>
+    -- SHA-256 of the opaque token; raw token only in the cookie
+  * created_at : timestamptz default now()
+  * expires_at : timestamptz
+    rotated_at : timestamptz
+    replaced_by_id : uuid <<FK refresh_tokens.id>>
+    revoked_at : timestamptz
+    user_agent : varchar(255)
+    ip : inet
+  --
+  INDEX (family_id)
+  INDEX (user_id)
+}
+
+entity "channel_members\n(owned by chat)" as members #EEEEEE {
+  * channel_id : uuid <<FK>>
+  * user_id : uuid <<FK>>
+}
+
+entity "messages\n(owned by chat)" as messages #EEEEEE {
+  * id : uuid <<PK>>
+  * sender_id : uuid <<FK>>
+}
+
+entity "channels\n(owned by chat)" as channels #EEEEEE {
+  * id : uuid <<PK>>
+  * created_by : uuid <<FK>>
+}
+
+users ||--o{ rt : "has sessions"
+rt |o--o| rt : "replaced_by"
+users ||--o{ members : "belongs to channels"
+users ||--o{ messages : "sends"
+users ||--o{ channels : "creates"
+
+note bottom of rt
+  Access token: JWT (HS256, 15 min) in cookie pt_access, never stored.
+  Refresh token: opaque, 7 days, cookie pt_refresh (Path=/api/auth),
+  rotated on every use. Presenting an already rotated token after the
+  10 s grace window revokes the whole family (theft detection).
+  Login/signup throttling lives in Redis, not Postgres:
+    ratelimit:login:{username}  ·  ratelimit:login_ip:{ip}  ·  ratelimit:signup_ip:{ip}
+end note
+@enduml

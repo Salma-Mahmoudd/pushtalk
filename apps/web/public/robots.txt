@@ -1,0 +1,6 @@
+# The sign-in page may be indexed; channels and the API require an account.
+User-agent: *
+Allow: /$
+Allow: /login
+Allow: /signup
+Disallow: /

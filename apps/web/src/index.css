@@ -1,0 +1,25 @@
+:root {
+  color-scheme: light dark;
+  font-family: 'Open Sans', system-ui, sans-serif;
+  color: #0f1419;
+  background: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #e7e9ea;
+    background: #000000;
+  }
+}
+
+body {
+  margin: 0;
+}
+
+.placeholder {
+  min-height: 100svh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  text-align: center;
+}

@@ -16,6 +16,18 @@ Run from `apps/web/` (Node and pnpm versions: see [`../../steps/environment-setu
 
 In Docker, the `web` image builds the app and nginx serves `dist/`.
 
+## UI
+
+- **Tailwind CSS v4** through the Vite plugin; styles and theme variables live in `src/index.css`.
+- **shadcn/ui** (Radix UI, Vega style, RTL-ready). Components are copied into `src/shared/ui/` and added only when a feature needs them:
+
+  ```bash
+  pnpm dlx shadcn@latest add dialog
+  ```
+
+- **Theme:** [tweakcn Twitter](https://tweakcn.com/) in light and dark, Open Sans (self-hosted). `src/shared/theme/` holds the provider (`next-themes`: light, dark or system, saved in `localStorage`) and the toggle. An inline script in `index.html` applies the saved theme before the first paint.
+- Imports use the `@/` alias for `src/` (for example `@/shared/ui/button`).
+
 ## Configuration
 
 | Variable | Default | Used for |

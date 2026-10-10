@@ -40,7 +40,9 @@ src/
   app/                App level: router, session start-up, logged-in shell (header, log out)
   features/
     auth/             API calls, session store, refresh + tab sync, log-in/sign-up pages, route guards
-    channels/         Sidebar, browse/join, create dialog, channel room with live member presence
+    channels/         Sidebar, browse/join, create dialog, channel room with live member presence,
+                      message store (keyed by client id, status only moves forward), sending, message list
+    voice/            Recorder (MediaRecorder), push-to-talk button (pointer or Space, 0.5–60 s)
   shared/
     lib/api/          API client (cookies, error envelope → ApiError, one refresh for concurrent 401s)
                       and schema.d.ts, generated from the API (never edited by hand)

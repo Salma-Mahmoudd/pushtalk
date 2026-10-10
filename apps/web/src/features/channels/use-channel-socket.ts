@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { refreshOnce } from '@/shared/lib/api/client'
 import { type SocketEvent, type SocketState, socketUrl, WsClient } from '@/shared/lib/ws/ws-client'
 
+import { fromServer, type MessageOut, useMessageStore } from './message-store'
 import { channelKeys } from './queries'
 
 export interface ChannelSocket {
@@ -38,6 +39,18 @@ export function useChannelSocket(channelId: string, enabled: boolean): ChannelSo
         case 'member.joined':
           void queryClient.invalidateQueries({ queryKey: channelKeys.members(channelId) })
           break
+        // processing and failed come over the user's own topic, shared by all of their rooms.
+        case 'message.ready':
+        case 'message.processing': {
+          const message = event.data as unknown as MessageOut
+          if (message.channel_id === channelId) useMessageStore.getState().upsert([fromServer(message)])
+          break
+        }
+        case 'message.failed': {
+          const failed = event.data as { channel_id: string; client_msg_id: string; reason: string }
+          if (failed.channel_id === channelId) useMessageStore.getState().markFailed(channelId, failed.client_msg_id, failed.reason)
+          break
+        }
       }
     }
     const client = new WsClient({

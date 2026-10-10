@@ -175,10 +175,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/channels/{channel_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Messages */
+        get: operations["list_messages_api_channels__channel_id__messages_get"];
+        put?: never;
+        /**
+         * Upload Message
+         * @description Validates and stores a recording, queues processing; the result arrives by WebSocket.
+         */
+        post: operations["upload_message_api_channels__channel_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/messages/{message_id}/audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Message Audio
+         * @description The processed recording (Ogg/Opus), for channel members; supports Range for seeking.
+         */
+        get: operations["message_audio_api_messages__message_id__audio_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Body_upload_message_api_channels__channel_id__messages_post */
+        Body_upload_message_api_channels__channel_id__messages_post: {
+            /**
+             * File
+             * @description The recording
+             */
+            file: string;
+            /**
+             * Client Msg Id
+             * Format: uuid
+             * @description Client-generated id; retries reuse it
+             */
+            client_msg_id: string;
+        };
         /** ChannelCreate */
         ChannelCreate: {
             /** Name */
@@ -227,6 +282,63 @@ export interface components {
             username: string;
             /** Online */
             online: boolean;
+        };
+        /** MessageOut */
+        MessageOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Channel Id
+             * Format: uuid
+             */
+            channel_id: string;
+            /**
+             * Client Msg Id
+             * Format: uuid
+             */
+            client_msg_id: string;
+            sender: components["schemas"]["SenderOut"];
+            status: components["schemas"]["MessageStatus"];
+            /** Seq */
+            seq: number | null;
+            /** Duration Ms */
+            duration_ms: number | null;
+            /** Waveform */
+            waveform: number[] | null;
+            /** Failure Reason */
+            failure_reason: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** MessagePage */
+        MessagePage: {
+            /** Messages */
+            messages: components["schemas"]["MessageOut"][];
+            /** Pending */
+            pending: components["schemas"]["MessageOut"][];
+            /** Has More */
+            has_more: boolean;
+        };
+        /**
+         * MessageStatus
+         * @enum {string}
+         */
+        MessageStatus: "processing" | "ready" | "failed";
+        /** SenderOut */
+        SenderOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Username */
+            username: string;
         };
         /** SessionOut */
         SessionOut: {
@@ -562,6 +674,105 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["MemberOut"][];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_messages_api_channels__channel_id__messages_get: {
+        parameters: {
+            query?: {
+                after_seq?: number | null;
+                before_seq?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                channel_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessagePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_message_api_channels__channel_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channel_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_message_api_channels__channel_id__messages_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    message_audio_api_messages__message_id__audio_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

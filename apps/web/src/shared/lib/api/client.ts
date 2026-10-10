@@ -86,11 +86,13 @@ interface RequestOptions {
  * credential endpoints are never retried, so a failed login or refresh is reported as it is.
  */
 export async function apiRequest<T>(path: string, options: RequestOptions = {}, retried = false): Promise<T> {
+  // FormData (file uploads) sets its own multipart Content-Type; anything else is sent as JSON.
+  const isForm = options.body instanceof FormData
   const response = await fetch(path, {
     method: options.method ?? 'GET',
     credentials: 'same-origin',
-    headers: options.body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    headers: options.body === undefined || isForm ? undefined : { 'Content-Type': 'application/json' },
+    body: options.body === undefined ? undefined : isForm ? (options.body as FormData) : JSON.stringify(options.body),
     signal: options.signal,
   })
 

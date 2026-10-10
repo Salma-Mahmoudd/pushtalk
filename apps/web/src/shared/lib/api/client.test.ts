@@ -106,4 +106,16 @@ describe('apiRequest', () => {
 
     await expect(apiRequest('/api/things')).rejects.toMatchObject({ status: 502, code: 'network_error' })
   })
+
+  it('sends FormData as multipart without a JSON content type', async () => {
+    fetchMock.mockResolvedValue(json(202, { id: 'm1' }))
+    const form = new FormData()
+    form.append('client_msg_id', 'c1')
+
+    await apiRequest('/api/upload', { method: 'POST', body: form })
+
+    const [, init] = fetchMock.mock.calls[0]
+    expect(init?.body).toBe(form)
+    expect(init?.headers).toBeUndefined()
+  })
 })

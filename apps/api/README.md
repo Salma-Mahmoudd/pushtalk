@@ -39,7 +39,8 @@ src/pushtalk/
     models.py     messages: status, seq, duration, waveform, file keys
     service.py    Upload: membership, size, sniffed type, real duration, idempotent client id
     processing.py Worker job: Opus/OGG, duration, waveform, seq, broadcast; failures tell the sender
-    router.py     Upload (202), history pages, protected audio (members only, Range support)
+    receipts.py   Delivered/played reports, counts per message, per-recipient details (sender only)
+    router.py     Upload (202), history pages, protected audio (members only, Range support), receipts
   worker/         Celery app (Redis broker, queue "audio", acks late) and the retrying task
   channels/       Channels, membership and presence (see specs/chat/plan.md)
     models.py     channels, channel_members
@@ -47,7 +48,9 @@ src/pushtalk/
     service.py    Create, list, join, members; membership checks
     router.py     /api/channels endpoints
   realtime/       WebSockets
-    router.py     /ws/channels/{id}: cookie auth (4401), membership (4403), presence, ping
+    router.py     /ws/channels/{id}: cookie auth (4401), membership (4403), presence, ping,
+                  catch-up (since_seq), receipts, playback claims, event rate limit
+    players.py    Which of a user's connections plays a channel (one playing tab per user)
     manager.py    This process's sockets and their Redis pub/sub subscriptions
     bus.py        Event envelope and publishing to Redis topics
     sweeper.py    Announces users whose connections stopped sending heartbeats
@@ -78,6 +81,20 @@ migrations/       Alembic (async template); env.py reads DATABASE_URL
 tests/            pytest suite; database tests use a migrated `pushtalk_test` database
                   (each test rolled back) and are skipped when PostgreSQL is not running
 ```
+
+## Rate limits
+
+Redis sliding windows shared by every API process (`infra/rate_limit.py`); a refused request gets **429** `rate_limited` with a `Retry-After` header. Each rule is a `"<requests>/<seconds>"` setting in [`../../.env.example`](../../.env.example).
+
+| Action | Default | Counted per |
+| --- | --- | --- |
+| Log in | 10 / 15 min and 30 / 15 min | username, and client IP |
+| Sign up | 5 / hour | client IP |
+| Upload a voice message | 20 / minute and 200 / day | user |
+| Create a channel | 10 / hour | user |
+| WebSocket events from the client | 30 / second | connection (in memory); the excess is dropped with an `error` event |
+
+Client IPs come from `X-Forwarded-For`, set by nginx; uvicorn trusts it (`--proxy-headers`) because only nginx reaches the API. A receipt event can carry up to 200 `message_ids`, so a catch-up stays far below the event limit.
 
 Every error response has the same shape:
 

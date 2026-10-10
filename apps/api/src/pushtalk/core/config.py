@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     rate_limit_login_username: RateLimitSetting = "10/900"
     rate_limit_login_ip: RateLimitSetting = "30/900"
     rate_limit_signup_ip: RateLimitSetting = "5/3600"
+    rate_limit_upload_user: RateLimitSetting = "20/60"
+    rate_limit_upload_user_daily: RateLimitSetting = "200/86400"
+    rate_limit_channel_create_user: RateLimitSetting = "10/3600"
+    # Events a client may send per WebSocket connection; the excess is dropped with an error.
+    rate_limit_ws_events: RateLimitSetting = "30/1"
 
     # Voice messages. Media is stored on disk (a Docker volume shared by api and worker).
     media_dir: Path = Path("var/media")

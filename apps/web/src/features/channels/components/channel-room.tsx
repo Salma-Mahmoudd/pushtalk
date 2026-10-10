@@ -59,19 +59,22 @@ function ChannelRoom({ channelId }: { channelId: string }) {
   const userId = user?.id
 
   const sendRef = useRef<(event: { type: string; data?: Record<string, unknown> }) => boolean>(() => false)
-  const report = useCallback((messageId: string, status: 'delivered' | 'played') => {
-    sendRef.current({ type: 'receipt', data: { message_id: messageId, status } })
+  // One event for a whole batch (a catch-up can deliver 200 messages at once).
+  const report = useCallback((messageIds: string[], status: 'delivered' | 'played') => {
+    if (messageIds.length > 0) sendRef.current({ type: 'receipt', data: { message_ids: messageIds, status } })
   }, [])
 
-  const { queue, snapshot } = usePlayback(useCallback((item: QueueItem) => report(item.id, 'played'), [report]))
+  const { queue, snapshot } = usePlayback(useCallback((item: QueueItem) => report([item.id], 'played'), [report]))
 
   const onIncoming = useCallback(
     (messages: MessageOut[], { autoplay }: IncomingOptions) => {
+      const delivered: string[] = []
       for (const message of messages) {
         if (message.sender.id === userId || message.seq === null) continue
-        report(message.id, 'delivered')
+        delivered.push(message.id)
         if (autoplay) queue.enqueue({ id: message.id, seq: message.seq, src: audioSrc(message.id), own: false })
       }
+      report(delivered, 'delivered')
     },
     [queue, report, userId],
   )

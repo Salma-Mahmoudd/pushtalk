@@ -11,6 +11,8 @@ from pushtalk.auth.deps import authenticate_websocket
 from pushtalk.channels.errors import ChannelNotFound, NotAMember
 from pushtalk.channels.presence import PresenceService
 from pushtalk.channels.service import ChannelService
+from pushtalk.core.config import Settings
+from pushtalk.infra.rate_limit import LocalRateLimiter, RateLimitRule
 from pushtalk.messages.receipts import ReceiptService
 from pushtalk.messages.repository import MessageRepository
 from pushtalk.realtime.bus import EventBus, channel_topic, event, user_topic
@@ -26,6 +28,8 @@ CLOSE_FORBIDDEN = 4403
 IDLE_TIMEOUT_S = 60
 # Catch-up sends at most this many messages; the client pages the rest over HTTP.
 CATCHUP_LIMIT = 200
+# One receipt event may cover this many messages (e.g. everything a catch-up delivered).
+RECEIPT_BATCH_LIMIT = CATCHUP_LIMIT
 
 
 @router.websocket("/ws/channels/{channel_id}")
@@ -35,6 +39,7 @@ async def channel_socket(
     since_seq: Annotated[int | None, Query(ge=0)] = None,
 ) -> None:
     state = websocket.app.state
+    settings: Settings = state.settings
     current = await authenticate_websocket(websocket)
     # Accept before closing: a refused handshake hides the close code from the browser.
     await websocket.accept()
@@ -57,6 +62,7 @@ async def channel_socket(
     user_id = current.user.id
     connection = Connection(websocket, user_id, current.claims.session_id)
     topic = channel_topic(channel_id)
+    events_limit = LocalRateLimiter(RateLimitRule.parse("ws_events", settings.rate_limit_ws_events))
     # Subscribed before reading history, so a message published meanwhile is not lost
     # (it may arrive twice; clients ignore a seq they already have).
     await manager.register(connection, [topic, user_topic(user_id)])
@@ -85,6 +91,15 @@ async def channel_socket(
             async with asyncio.timeout(IDLE_TIMEOUT_S):
                 raw = await websocket.receive_text()
             message = _parse(raw)
+            if not events_limit.allow():
+                await connection.send(
+                    event(
+                        "error",
+                        code="rate_limited",
+                        message="Too many events; this one was dropped.",
+                    )
+                )
+                continue
             match message.get("type"):
                 case "ping":
                     await presence.heartbeat(channel_id, user_id, connection.id)
@@ -113,14 +128,22 @@ async def channel_socket(
 async def _record_receipt(
     state: State, bus: EventBus, user_id: uuid.UUID, channel_id: uuid.UUID, data: object
 ) -> None:
+    """Accepts {message_id, status} or {message_ids: [...], status}; invalid ids are skipped."""
     if not isinstance(data, dict) or data.get("status") not in ("delivered", "played"):
         return
-    try:
-        message_id = uuid.UUID(str(data.get("message_id")))
-    except ValueError:
+    raw_ids = data.get("message_ids", [data.get("message_id")])
+    if not isinstance(raw_ids, list):
         return
+    message_ids: list[uuid.UUID] = []
+    for raw_id in raw_ids[:RECEIPT_BATCH_LIMIT]:
+        try:
+            message_ids.append(uuid.UUID(str(raw_id)))
+        except ValueError:
+            continue
     async with state.sessionmaker() as session:
-        await ReceiptService(session, bus).record(user_id, channel_id, message_id, data["status"])
+        receipts = ReceiptService(session, bus)
+        for message_id in message_ids:
+            await receipts.record(user_id, channel_id, message_id, data["status"])
 
 
 def _parse(raw: str) -> dict[str, object]:

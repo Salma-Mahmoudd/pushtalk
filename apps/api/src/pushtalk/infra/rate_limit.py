@@ -1,6 +1,7 @@
 import math
 import time
 import uuid
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -69,3 +70,21 @@ class RateLimiter:
         )
         if int(wait_ms) > 0:
             raise RateLimited(retry_after_s=max(1, math.ceil(int(wait_ms) / 1000)))
+
+
+class LocalRateLimiter:
+    """The same sliding window in memory, for limits on one object (e.g. one WebSocket)."""
+
+    def __init__(self, rule: RateLimitRule, clock: Callable[[], float] = time.monotonic) -> None:
+        self._rule = rule
+        self._clock = clock
+        self._hits: deque[float] = deque()
+
+    def allow(self) -> bool:
+        now = self._clock()
+        while self._hits and self._hits[0] <= now - self._rule.window_s:
+            self._hits.popleft()
+        if len(self._hits) >= self._rule.limit:
+            return False
+        self._hits.append(now)
+        return True

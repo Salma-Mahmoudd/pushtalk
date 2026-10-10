@@ -71,7 +71,7 @@ Envelope: `{ "type": "...", "data": {...} }`
 | S→C | `message.transcribed` | `{id, status: "done"\|"failed", transcript?, lang?}` |
 | S→C | `playback.released` | another tab of the user took over playback |
 | S→C | `error` | error envelope |
-| C→S | `receipt` | `{message_id, status: "delivered"\|"played"}` |
+| C→S | `receipt` | `{message_id, status: "delivered"\|"played"}`, or `{message_ids: [...], status}` for up to 200 at once (a catch-up) |
 | C→S | `playback.claim` | — |
 | C→S | `ping` → S→C `pong` | keep-alive every 25 s |
 

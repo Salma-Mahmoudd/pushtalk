@@ -6,7 +6,8 @@ from fastapi.responses import FileResponse
 
 from pushtalk.auth.deps import CurrentUserDep
 from pushtalk.channels.router import ChannelServiceDep
-from pushtalk.core.deps import RedisDep, SessionDep, SettingsDep
+from pushtalk.core.deps import RateLimiterDep, RedisDep, SessionDep, SettingsDep
+from pushtalk.infra.rate_limit import RateLimitRule
 from pushtalk.messages.receipts import ReceiptService
 from pushtalk.messages.schemas import MessageOut, MessagePage, RecipientReceipt
 from pushtalk.messages.service import MessageService
@@ -32,10 +33,17 @@ async def upload_message(
     channel_id: uuid.UUID,
     current: CurrentUserDep,
     service: MessageServiceDep,
+    limiter: RateLimiterDep,
+    settings: SettingsDep,
     file: Annotated[UploadFile, File(description="The recording")],
     client_msg_id: Annotated[uuid.UUID, Form(description="Client-generated id; retries reuse it")],
 ) -> MessageOut:
     """Validates and stores a recording, queues processing; the result arrives by WebSocket."""
+    user_key = str(current.user.id)
+    await limiter.hit(RateLimitRule.parse("upload", settings.rate_limit_upload_user), user_key)
+    await limiter.hit(
+        RateLimitRule.parse("upload_daily", settings.rate_limit_upload_user_daily), user_key
+    )
     return await service.create_voice_message(current.user, channel_id, file, client_msg_id)
 
 

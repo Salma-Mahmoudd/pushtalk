@@ -1,7 +1,7 @@
 import pytest
 from fakeredis import FakeAsyncRedis
 
-from pushtalk.infra.rate_limit import RateLimited, RateLimiter, RateLimitRule
+from pushtalk.infra.rate_limit import LocalRateLimiter, RateLimited, RateLimiter, RateLimitRule
 
 RULE = RateLimitRule(scope="test", limit=3, window_s=60)
 
@@ -73,3 +73,11 @@ def test_rule_parse() -> None:
     assert RateLimitRule.parse("login", "10/900") == RateLimitRule("login", 10, 900)
     with pytest.raises(ValueError):
         RateLimitRule.parse("login", "0/900")
+
+
+def test_local_limiter_slides_its_window(clock: Clock) -> None:
+    local = LocalRateLimiter(RateLimitRule(scope="ws", limit=2, window_s=1), clock=clock)
+
+    assert [local.allow(), local.allow(), local.allow()] == [True, True, False]
+    clock.now += 1
+    assert local.allow()

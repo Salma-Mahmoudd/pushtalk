@@ -162,3 +162,18 @@ async def test_last_focused_tab_becomes_the_player(
             "playback.claimed", lambda data: data["connection_id"] is None
         )
         assert released["data"]["connection_id"] is None
+
+
+async def test_one_receipt_event_can_cover_many_messages(
+    db_app: FastAPI, db_client: AsyncClient, room: dict[str, Any]
+) -> None:
+    channel_id = room["channel"]["id"]
+    report = {"message_ids": [*room["ids"], "not-a-uuid"], "status": "delivered"}
+    async with WsClient(db_app, f"/ws/channels/{channel_id}", _cookies(room["bob_client"])) as ws:
+        await ws.accepted()
+        await ws.send_json({"type": "receipt", "data": report})
+        await ws.send_json({"type": "ping"})
+        await ws.next_event("pong")
+
+    history = (await db_client.get(f"/api/channels/{channel_id}/messages")).json()["messages"]
+    assert [m["receipts"]["delivered"] for m in history] == [1, 1]

@@ -67,30 +67,30 @@ Startup fails fast with a clear message when a setting is invalid, for example `
 
 ### Phase 0: Skeleton (first, it unblocks everything)
 
-Generators create the standard files; the structure that is specific to this project is written by hand.
+Generators create the standard files; the structure that is specific to this project is written by hand. Each service and library arrives in the commit that first uses it, so nothing is installed before it is needed; task 0.9 is the complete stack.
 
 | # | Task | Done when |
 | --- | --- | --- |
 | 0.1 | `.env.example`, root `Makefile` (`up`, `dev`, `down`, `reset`, `logs`, `test`, `lint`, `types`, `diagrams`), README stub | `make help` lists targets |
-| 0.2 | `apps/api`: `uv init --package --name pushtalk`, `uv add` runtime and dev dependencies, FastAPI app factory, `/api/health` (checks db, redis, minio and `ffmpeg -version`) | `uv run uvicorn pushtalk.main:app` serves health |
+| 0.2 | `apps/api`: `uv init --package --name pushtalk`, `uv add` runtime and dev dependencies, FastAPI app factory, `/api/health` (gains one check per dependency as it is added: database and Redis in Phase 0, MinIO and `ffmpeg -version` in Phase 3) | `uv run uvicorn pushtalk.main:app` serves health |
 | 0.3 | Settings, structlog JSON logging, request-id middleware, error envelope + handlers, `OriginCheckMiddleware` | bad JSON → envelope 422; foreign Origin → 403 |
-| 0.3b | Shared `RateLimiter` + `RateLimited` error (429 + `Retry-After`) with unit tests on fakeredis | ready for Phase 1 and Phase 5B |
+| 0.3b | `docker-compose.yml` with postgres + redis (health checks, volumes, Redis append-only file); `docker-compose.dev.yml` publishes them on `127.0.0.1:5433` and `127.0.0.1:6380` | both services `healthy`, reachable from the host |
 | 0.3c | ruff + **mypy --strict** on `src/`, `tsc --noEmit` strict + eslint on web; `make lint` runs all of them | clean from the first commit |
 | 0.4 | SQLAlchemy async engine/session dependency, `alembic init -t async migrations`, empty baseline migration | `alembic upgrade head` OK |
 | 0.5 | Celery app (`pushtalk.worker.celery_app`): Redis broker, queues `audio` + `transcribe`, `acks_late`, `reject_on_worker_lost`, prefetch 1; a no-op task | worker logs the no-op task |
 | 0.6 | `Dockerfile` for api (python:3.12-slim + ffmpeg + uv), targets `app` and `transcriber` | image builds |
 | 0.7 | `apps/web`: `pnpm create vite --template react-ts`, Tailwind + `shadcn init`, Zustand, TanStack Query, vitest, `ApiClient`, router shell, feature folders | `pnpm dev` shows page |
 | 0.8 | web `Dockerfile` (node build → nginx) + `nginx.conf` with WS upgrade | `/api/health` works via :8080 |
-| 0.9 | `docker-compose.yml`: postgres, redis, minio, minio-init, migrate, api, worker, transcriber (no-op until Phase 5C), flower, web, with healthchecks | **fresh clone → `docker compose up` → app on :8080, Flower on :5555** |
-| 0.10 | `docker-compose.dev.yml`: bind mounts, `uvicorn --reload`, Celery restarted on change (`watchfiles`), Vite dev server :5173 proxying `/api` and `/ws`, minio console :9001; `make dev` | edit a file → reload |
+| 0.9 | `docker-compose.yml`: postgres, redis, migrate, api, worker, transcriber (no-op until Phase 5C), flower, web, with healthchecks (minio + minio-init join in Phase 3) | **fresh clone → `docker compose up` → app on :8080, Flower on :5555** |
+| 0.10 | `docker-compose.dev.yml`: bind mounts, `uvicorn --reload`, Celery restarted on change (`watchfiles`), Vite dev server :5173 proxying `/api` and `/ws` (minio console :9001 from Phase 3); `make dev` | edit a file → reload |
 
 ### Phase 1–5
 
 Feature work lives in [`../auth/plan.md`](../auth/plan.md) and [`../chat/plan.md`](../chat/plan.md). Arch-level tasks inside those phases:
 
-- P1: `get_current_user` (cookie) becomes the standard auth guard; refresh rotation and logout publish `session.revoked`.
+- P1: `get_current_user` (cookie) becomes the standard auth guard; refresh rotation and logout publish `session.revoked`; the shared `RateLimiter` arrives with its first user, the login and signup limits.
 - P2: `EventBus` (Redis pub/sub) + `ConnectionManager` + `PresenceService`.
-- P3: `ObjectStorage` + `ffmpeg` infra modules; `process_message` Celery task with retries.
+- P3: `minio` + `minio-init` compose services; `ObjectStorage` + `ffmpeg` infra modules and their health checks; `process_message` Celery task with retries.
 - P4: nginx `proxy_read_timeout 3600s` for WS; app-level ping every 25 s.
 - P5: `transcriber` Dockerfile target with the `base` model downloaded at build time and a `whisper-models` volume for other sizes; provider factory; `/ws/me` user socket; rate-limit rules in env.
 

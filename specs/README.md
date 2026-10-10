@@ -16,8 +16,8 @@ Every `*.puml` file sits next to its rendered SVGs. A `.puml` holding several `@
 
 | Phase | Scope | Spec | Brief coverage |
 | --- | --- | --- | --- |
-| **0** | Skeleton: monorepo, compose (+ dev override) with healthchecks, config, logs, error envelope, shared rate limiter, strict typing/lint, Alembic baseline | app-arch | DevOps hygiene, code quality |
-| **1** | Auth: users, signup/login, cookie JWT + refresh rotation, logout, Origin check, login/signup rate limits, FE auth pages and session sync | auth | Story 1 |
+| **0** | Skeleton: monorepo, compose (+ dev override) with healthchecks, config, logs, error envelope, strict typing/lint, Alembic baseline | app-arch | DevOps hygiene, code quality |
+| **1** | Auth: users, signup/login, cookie JWT + refresh rotation, logout, shared rate limiter with login/signup limits, FE auth pages and session sync | auth | Story 1 |
 | **2** | Channels, membership, WS hub, Redis pub/sub, heartbeat presence | chat | Story 2 |
 | **3** | Voice pipeline: record → upload → validate → Celery + ffmpeg → broadcast; failure path; protected audio | chat | Stories 3, 7, pipeline, security |
 | **4** | Catch-up + reconnect/backoff, PlaybackQueue, autoplay unlock, receipts (aggregated **and** per-recipient), multi-tab/device | chat | Stories 4–7, realtime correctness |

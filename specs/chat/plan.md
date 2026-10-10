@@ -190,7 +190,7 @@ The brief calls these optional, but they're in scope for this project. Build the
 
 | # | Task | Acceptance |
 | --- | --- | --- |
-| 5B.1 | Use the shared `RateLimiter` from Phase 0 (Redis sliding window); add the chat rules below as env-configurable `RateLimitRule`s | — |
+| 5B.1 | Use the shared `RateLimiter` from Phase 1 (Redis sliding window); add the chat rules below as env-configurable `RateLimitRule`s | — |
 | 5B.2 | Rules: upload 20/min and 200/day per user; channel create 10/hour; DM create 10/min; login 10/15 min per username **and** 30/15 min per IP; signup 5/hour per IP; WS `receipt`/`playback.claim` 30/s per connection (excess dropped + `error` event) | — |
 | 5B.3 | `RateLimited` → 429 envelope + `Retry-After`; FE shows "slow down, retry in N s" on the bubble or form | 21st upload in a minute → 429 |
 

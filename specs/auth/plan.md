@@ -69,7 +69,7 @@ Diagrams are shown in [Diagrams](#diagrams) below. Sources: `er-diagrams.puml`, 
 | 1.5 | `auth/router.py` + Pydantic schemas | matches API table |
 | 1.6 | `deps.get_current_user` (cookie) + `get_ws_user(websocket)`; `OriginCheckMiddleware` covers unsafe methods and WS handshakes | protected route returns 401 envelope without cookie; foreign Origin → 403 |
 | 1.7 | Logout publishes `session.revoked {sid}` on `user:{id}`; `ConnectionManager.close_session(sid)` closes those sockets with 4401 | open socket closes after logout |
-| 1.8 | Login/signup rate limits wired to `RateLimiter` (built in app-arch Phase 0 as shared infra) | 11th bad login in 15 min → 429 |
+| 1.8 | Shared `RateLimiter` (Redis sliding window, `src/pushtalk/infra/rate_limit.py`) + `RateLimited` error (429 + `Retry-After`), unit-tested on fakeredis, built here with its first user: the login/signup limits | 11th bad login in 15 min → 429 |
 
 ### Frontend (`src/features/auth/` + `shared/lib/api/`)
 

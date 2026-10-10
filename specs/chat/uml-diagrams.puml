@@ -195,8 +195,11 @@ note over pq
   candidates. The first one claims automatically; a tab claims again
   when it gains focus. The server sends playback.claimed {connection_id}
   to all of the user's connections on the channel: the named one plays,
-  the others stay silent and show "Play here". When the player closes,
-  playback.claimed {connection_id: null} lets the focused tab take over.
+  the others stay silent and show "Play here". Every new connection is
+  told the current player right after hello. When the player closes,
+  playback.claimed {connection_id: null} lets the focused tab take over;
+  tabs without focus send playback.claim_if_free (first one wins).
+  A tab whose connection drops goes silent until the server answers.
 end note
 @enduml
 

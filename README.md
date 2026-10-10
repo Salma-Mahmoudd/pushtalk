@@ -9,9 +9,21 @@
 
 ---
 
+## Quick start
+
+Requires Docker with Compose v2. From the repository root:
+
+```bash
+docker compose up --build
+```
+
+Then open <http://localhost:8080>. No `.env` file is needed; every setting has a development default (see [`.env.example`](.env.example)).
+
+With `make` installed, `make up` does the same in the background; `make help` lists every command (logs, tests, migrations, development mode).
+
 ## Status
 
-Planning is complete and the skeleton (Phase 0) is in progress. The roadmap, phase by phase, is in [`specs/README.md`](specs/README.md).
+Phases follow the roadmap in [`specs/README.md`](specs/README.md).
 
 ## Features
 

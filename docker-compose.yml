@@ -1,5 +1,16 @@
 name: pushtalk
 
+# Shared by the API image's services (api, migrate): build and connection settings.
+x-api: &api
+  build: ./apps/api
+  image: pushtalk-api
+  environment:
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-pushtalk}:${POSTGRES_PASSWORD:-pushtalk}@postgres:5432/${POSTGRES_DB:-pushtalk}
+    REDIS_URL: redis://redis:6379/0
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    LOG_FORMAT: ${LOG_FORMAT:-json}
+    ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080,http://localhost:5173}
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -27,6 +38,40 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
+
+  # One-off job: applies database migrations, then exits; the API waits for it to succeed.
+  migrate:
+    <<: *api
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *api
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # Fails unless GET /api/health answers 200 (database and Redis reachable).
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  web:
+    build: ./apps/web
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

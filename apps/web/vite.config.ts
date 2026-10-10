@@ -12,4 +12,10 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
+  server: {
+    // Same origin as in production (nginx): the browser only talks to the dev server.
+    proxy: {
+      '/api': process.env.API_PROXY_TARGET ?? 'http://localhost:8001',
+    },
+  },
 })

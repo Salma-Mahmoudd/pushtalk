@@ -14,7 +14,9 @@ Run from `apps/web/` (Node and pnpm versions: see [`../../steps/environment-setu
 | `pnpm preview` | Serve the built `dist/` locally to check a production build |
 | `pnpm lint` | ESLint |
 
-In Docker, the `web` image builds the app and nginx serves `dist/`.
+`pnpm dev` forwards `/api` to the API (`API_PROXY_TARGET`, default `http://localhost:8001`, the API started by `make dev`), so the browser sees one origin, as with nginx in production.
+
+In Docker, the `web` image builds the app and nginx serves `dist/` ([`nginx/default.conf`](nginx/default.conf)): `/api/` is proxied to the API, hashed assets are cached for a year, and every response carries a Content-Security-Policy that allows only same-origin scripts ([`nginx/security-headers.conf`](nginx/security-headers.conf)). For that reason the pre-paint theme script lives in `public/theme-init.js` instead of inline in `index.html`.
 
 ## UI
 
@@ -25,7 +27,7 @@ In Docker, the `web` image builds the app and nginx serves `dist/`.
   pnpm dlx shadcn@latest add dialog
   ```
 
-- **Theme:** [tweakcn Twitter](https://tweakcn.com/) in light and dark, Open Sans (self-hosted). `src/shared/theme/` holds the provider (`next-themes`: light, dark or system, saved in `localStorage`) and the toggle. An inline script in `index.html` applies the saved theme before the first paint.
+- **Theme:** [tweakcn Twitter](https://tweakcn.com/) in light and dark, Open Sans (self-hosted). `src/shared/theme/` holds the provider (`next-themes`: light, dark or system, saved in `localStorage`) and the toggle. `public/theme-init.js` applies the saved theme before the first paint.
 - Imports use the `@/` alias for `src/` (for example `@/shared/ui/button`).
 
 ## Configuration
@@ -33,6 +35,7 @@ In Docker, the `web` image builds the app and nginx serves `dist/`.
 | Variable | Default | Used for |
 | --- | --- | --- |
 | `VITE_SITE_URL` | `http://localhost:8080` | Absolute address in the social-preview tags (`og:url`, `og:image`) of `index.html` |
+| `API_PROXY_TARGET` | `http://localhost:8001` | Where `pnpm dev` forwards `/api` |
 
 ## Brand assets
 

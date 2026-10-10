@@ -25,6 +25,8 @@ function seconds(ms: number): string {
 export function PttButton({ onRecorded, onRecordingChange, disabled }: PttButtonProps) {
   const recorder = useRef(new Recorder())
   const holding = useRef(false)
+  // Set once per recording: the timer effect may restart when the parent re-renders.
+  const startedAt = useRef(0)
   const [recording, setRecording] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [hint, setHint] = useState<string | null>(null)
@@ -65,6 +67,7 @@ export function PttButton({ onRecorded, onRecordingChange, disabled }: PttButton
       recorder.current.cancel()
       return
     }
+    startedAt.current = performance.now()
     setElapsed(0)
     setRecordingState(true)
   }, [disabled, setRecordingState])
@@ -72,9 +75,8 @@ export function PttButton({ onRecorded, onRecordingChange, disabled }: PttButton
   // Elapsed time, and the 60 s limit.
   useEffect(() => {
     if (!recording) return
-    const startedAt = performance.now()
     const timer = setInterval(() => {
-      const ms = performance.now() - startedAt
+      const ms = performance.now() - startedAt.current
       setElapsed(ms)
       if (ms >= MAX_RECORDING_MS) void finish()
     }, 100)

@@ -13,7 +13,8 @@ x-api: &api
     MEDIA_DIR: /data/media
     LOG_LEVEL: ${LOG_LEVEL:-INFO}
     LOG_FORMAT: ${LOG_FORMAT:-json}
-    ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080,http://localhost:5173}
+    # Follows WEB_PORT, so a different port keeps sign-in working.
+    ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:${WEB_PORT:-8080},http://localhost:5173}
     JWT_SECRET: ${JWT_SECRET:-dev-insecure-change-me-local-development-only}
     COOKIE_SECURE: ${COOKIE_SECURE:-true}
     TRANSCRIBE_PROVIDER: ${TRANSCRIBE_PROVIDER:-local}

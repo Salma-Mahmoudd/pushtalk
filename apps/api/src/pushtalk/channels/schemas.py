@@ -23,12 +23,19 @@ class ChannelCreate(BaseModel):
     name: ChannelName
 
 
+class UserOut(BaseModel):
+    id: uuid.UUID
+    username: str
+
+
 class ChannelOut(BaseModel):
     id: uuid.UUID
     kind: ChannelKind
+    # Group channels only; a direct channel is titled by its other participant (peer).
     name: str | None
     is_member: bool
     member_count: int
+    peer: UserOut | None = None
 
 
 class MemberOut(BaseModel):

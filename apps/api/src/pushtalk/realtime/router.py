@@ -12,6 +12,7 @@ from pushtalk.channels.errors import ChannelNotFound, NotAMember
 from pushtalk.channels.presence import PresenceService
 from pushtalk.channels.service import ChannelService
 from pushtalk.core.config import Settings
+from pushtalk.directs.service import APP_PRESENCE
 from pushtalk.infra.rate_limit import LocalRateLimiter, RateLimitRule
 from pushtalk.messages.receipts import ReceiptService
 from pushtalk.messages.repository import MessageRepository
@@ -153,3 +154,53 @@ def _parse(raw: str) -> dict[str, object]:
     except ValueError:
         return {}
     return message if isinstance(message, dict) else {}
+
+
+@router.websocket("/ws/me")
+async def user_socket(websocket: WebSocket) -> None:
+    """The user's app-wide socket: events for the user (new conversations) and "online
+    anywhere" presence, shown next to direct conversations."""
+    state = websocket.app.state
+    settings: Settings = state.settings
+    current = await authenticate_websocket(websocket)
+    await websocket.accept()
+    if current is None:
+        await websocket.close(code=CLOSE_UNAUTHORIZED)
+        return
+
+    manager: ConnectionManager = state.connections
+    presence: PresenceService = state.presence
+    user_id = current.user.id
+    connection = Connection(websocket, user_id, current.claims.session_id)
+    events_limit = LocalRateLimiter(RateLimitRule.parse("ws_events", settings.rate_limit_ws_events))
+    await manager.register(connection, [user_topic(user_id)])
+    try:
+        await connection.send(event("hello", connection_id=str(connection.id)))
+        await presence.connect(APP_PRESENCE, user_id, connection.id)
+        while True:
+            async with asyncio.timeout(IDLE_TIMEOUT_S):
+                raw = await websocket.receive_text()
+            message = _parse(raw)
+            if not events_limit.allow():
+                await connection.send(
+                    event(
+                        "error",
+                        code="rate_limited",
+                        message="Too many events; this one was dropped.",
+                    )
+                )
+                continue
+            if message.get("type") == "ping":
+                await presence.heartbeat(APP_PRESENCE, user_id, connection.id)
+                await connection.send(event("pong"))
+            else:
+                await connection.send(
+                    event("error", code="unknown_event", message="Unknown event type.")
+                )
+    except TimeoutError:
+        await websocket.close()
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        await manager.unregister(connection)
+        await presence.disconnect(APP_PRESENCE, user_id, connection.id)

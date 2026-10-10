@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     rate_limit_upload_user: RateLimitSetting = "20/60"
     rate_limit_upload_user_daily: RateLimitSetting = "200/86400"
     rate_limit_channel_create_user: RateLimitSetting = "10/3600"
+    rate_limit_dm_create_user: RateLimitSetting = "10/60"
     # Events a client may send per WebSocket connection; the excess is dropped with an error.
     rate_limit_ws_events: RateLimitSetting = "30/1"
 

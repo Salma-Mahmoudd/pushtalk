@@ -41,6 +41,10 @@ src/pushtalk/
     processing.py Worker job: Opus/OGG, duration, waveform, seq, broadcast; failures tell the sender
     receipts.py   Delivered/played reports, counts per message, per-recipient details (sender only)
     router.py     Upload (202), history pages, protected audio (members only, Range support), receipts
+  directs/        Direct messages: one channel of kind "direct" per pair of users (dm_key)
+    repository.py Race-safe get-or-create (INSERT ... ON CONFLICT on dm_key), list, user search
+    service.py    Open (201 new / 200 existing), list with the peer's online state, dm.created
+    router.py     GET /api/users?query=, GET and POST /api/dms
   transcription/  Speech to text after a message is ready (queue "transcribe")
     transcribers.py Providers: local faster-whisper, OpenAI; get_transcriber picks one from settings
     job.py        Saves the transcript (or "failed") and publishes message.transcribed
@@ -53,6 +57,7 @@ src/pushtalk/
   realtime/       WebSockets
     router.py     /ws/channels/{id}: cookie auth (4401), membership (4403), presence, ping,
                   catch-up (since_seq), receipts, playback claims, event rate limit
+                  /ws/me: the user's app-wide socket (dm.created, "online anywhere" presence)
     players.py    Which of a user's connections plays a channel (one playing tab per user)
     manager.py    This process's sockets and their Redis pub/sub subscriptions
     bus.py        Event envelope and publishing to Redis topics
@@ -97,6 +102,10 @@ Every ready message is transcribed by a second Celery step, after `message.ready
 
 `TRANSCRIBE_LANGUAGE` (for example `en` or `ar`) fixes the language; empty detects it per message. A job is retried twice, then the transcript is marked `failed` and the message stays playable. Messages carry `transcript_status` (`pending`, `done`, `failed`), `transcript` and `transcript_lang`; the channel gets `message.transcribed` when the text is ready. Locally, `uv sync` installs the `transcribe` group too, so tests and mypy cover it.
 
+## Direct messages
+
+A conversation between two users is a channel of kind `direct`, so voice messages, history, receipts, transcripts and the channel WebSocket work unchanged. `dm_key` (`"<smaller id>:<larger id>"`) is unique: two people opening the same conversation at the same moment get one channel. Direct channels are never listed in `GET /api/channels` and cannot be joined; to anyone outside the pair they answer 404, as if they did not exist.
+
 ## Rate limits
 
 Redis sliding windows shared by every API process (`infra/rate_limit.py`); a refused request gets **429** `rate_limited` with a `Retry-After` header. Each rule is a `"<requests>/<seconds>"` setting in [`../../.env.example`](../../.env.example).
@@ -107,6 +116,7 @@ Redis sliding windows shared by every API process (`infra/rate_limit.py`); a ref
 | Sign up | 5 / hour | client IP |
 | Upload a voice message | 20 / minute and 200 / day | user |
 | Create a channel | 10 / hour | user |
+| Open a direct conversation | 10 / minute | user |
 | WebSocket events from the client | 30 / second | connection (in memory); the excess is dropped with an `error` event |
 
 Client IPs come from `X-Forwarded-For`, set by nginx; uvicorn trusts it (`--proxy-headers`) because only nginx reaches the API. A receipt event can carry up to 200 `message_ids`, so a catch-up stays far below the event limit.

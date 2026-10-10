@@ -8,7 +8,7 @@ from pushtalk.channels.errors import CannotJoinDirect, ChannelExists, ChannelNot
 from pushtalk.channels.models import Channel, ChannelKind
 from pushtalk.channels.presence import PresenceService
 from pushtalk.channels.repository import ChannelRepository
-from pushtalk.channels.schemas import ChannelOut, MemberOut
+from pushtalk.channels.schemas import ChannelOut, MemberOut, UserOut
 from pushtalk.realtime.bus import EventBus, channel_topic, event
 
 
@@ -66,18 +66,23 @@ class ChannelService:
         if channel is None:
             raise ChannelNotFound()
         if not await self._channels.is_member(channel_id, user_id):
-            raise NotAMember()
+            # Outsiders cannot tell a private conversation exists.
+            raise ChannelNotFound() if channel.kind is ChannelKind.direct else NotAMember()
         return channel
 
     async def get(self, user: User, channel_id: uuid.UUID) -> ChannelOut:
         channel = await self.require_member(user.id, channel_id)
         members = await self._channels.members(channel_id)
+        peer = next((member for member in members if member.id != user.id), None)
         return ChannelOut(
             id=channel.id,
             kind=channel.kind,
             name=channel.name,
             is_member=True,
             member_count=len(members),
+            peer=UserOut(id=peer.id, username=peer.username)
+            if channel.kind is ChannelKind.direct and peer is not None
+            else None,
         )
 
     async def members(self, user: User, channel_id: uuid.UUID) -> list[MemberOut]:

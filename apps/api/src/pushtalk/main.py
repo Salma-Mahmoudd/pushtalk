@@ -18,6 +18,7 @@ from pushtalk.core.errors import register_error_handlers
 from pushtalk.core.logging import configure_logging
 from pushtalk.core.middleware import OriginCheckMiddleware, RequestContextMiddleware
 from pushtalk.db.session import create_engine
+from pushtalk.directs.router import router as directs_router
 from pushtalk.infra.rate_limit import RateLimiter
 from pushtalk.infra.redis import create_redis
 from pushtalk.infra.storage import FileStorage
@@ -81,6 +82,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(health.router)
     application.include_router(auth_router)
     application.include_router(channels_router)
+    application.include_router(directs_router)
     application.include_router(messages_router)
     application.include_router(realtime_router)
     return application

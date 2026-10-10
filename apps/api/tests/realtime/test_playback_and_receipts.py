@@ -7,7 +7,9 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 
 from pushtalk.core.security import ACCESS_COOKIE
+from pushtalk.messages.models import MessageReceipt
 from pushtalk.messages.processing import ProcessingContext, process_message
+from pushtalk.messages.receipts import ReceiptService
 from pushtalk.realtime.bus import EventBus
 from pushtalk.realtime.players import PlayerRegistry
 from tests.helpers import create_channel, signup
@@ -223,3 +225,44 @@ async def test_one_receipt_event_can_cover_many_messages(
 
     history = (await db_client.get(f"/api/channels/{channel_id}/messages")).json()["messages"]
     assert [m["receipts"]["delivered"] for m in history] == [1, 1]
+
+
+async def test_a_receipt_another_tab_already_stored_is_ignored_without_error(
+    db_app: FastAPI, db_client: AsyncClient, room: dict[str, Any]
+) -> None:
+    """Two tabs report the same message at once: the second insert must not fail."""
+    first = uuid.UUID(room["ids"][0])
+    bob_id = uuid.UUID(room["bob"]["id"])
+    channel_id = uuid.UUID(room["channel"]["id"])
+    async with db_app.state.sessionmaker() as session:
+        # The other tab's row, written by a plain insert as if it won the race.
+        session.add(MessageReceipt(message_id=first, user_id=bob_id))
+        await session.commit()
+    bus = EventBus(db_app.state.redis)
+    async with db_app.state.sessionmaker() as session:
+        await ReceiptService(session, bus).record(bob_id, channel_id, first, "delivered")
+    async with db_app.state.sessionmaker() as session:
+        await ReceiptService(session, bus).record(bob_id, channel_id, first, "played")
+        await ReceiptService(session, bus).record(bob_id, channel_id, first, "played")
+
+    details = (await db_client.get(f"/api/messages/{first}/receipts")).json()
+    assert details[0]["played_at"] is not None
+
+
+async def test_a_failing_event_does_not_close_the_connection(
+    db_app: FastAPI, room: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def failing(*_: object) -> None:
+        raise ValueError("database hiccup")
+
+    monkeypatch.setattr(ReceiptService, "record", failing)
+    path = f"/ws/channels/{room['channel']['id']}"
+    async with WsClient(db_app, path, _cookies(room["bob_client"])) as ws:
+        await ws.accepted()
+        report = {"message_id": room["ids"][0], "status": "delivered"}
+        await ws.send_json({"type": "receipt", "data": report})
+        error = await ws.next_event("error")
+        await ws.send_json({"type": "ping"})
+        await ws.next_event("pong")  # still connected
+
+    assert error["data"]["code"] == "event_failed"

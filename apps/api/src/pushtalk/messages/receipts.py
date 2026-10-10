@@ -3,7 +3,8 @@ from datetime import UTC, datetime
 from typing import Literal
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pushtalk.auth.models import User
@@ -42,16 +43,32 @@ class ReceiptService:
         ):
             return
         now = datetime.now(UTC)
-        receipt = await self._session.get(
-            MessageReceipt, (message_id, user_id), with_for_update=True
+        # Atomic, because two tabs of one user report the same message at the same moment:
+        # a read-then-insert would let both insert and one would fail on the primary key.
+        receipt = await self._session.scalar(
+            insert(MessageReceipt)
+            .values(
+                message_id=message_id,
+                user_id=user_id,
+                delivered_at=now,
+                played_at=now if status == "played" else None,
+            )
+            .on_conflict_do_nothing()
+            .returning(MessageReceipt)
         )
+        if receipt is None and status == "played":
+            receipt = await self._session.scalar(
+                update(MessageReceipt)
+                .where(
+                    MessageReceipt.message_id == message_id,
+                    MessageReceipt.user_id == user_id,
+                    MessageReceipt.played_at.is_(None),
+                )
+                .values(played_at=now)
+                .returning(MessageReceipt)
+            )
         if receipt is None:
-            receipt = MessageReceipt(message_id=message_id, user_id=user_id, delivered_at=now)
-            self._session.add(receipt)
-        elif status == "delivered" or receipt.played_at is not None:
-            return  # Nothing new: no write, no event.
-        if status == "played":
-            receipt.played_at = now
+            return  # Nothing new (a repeat, or another tab was first): no event.
         await self._session.commit()
 
         summary = await self.summary(message)

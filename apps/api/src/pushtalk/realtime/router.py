@@ -107,21 +107,30 @@ async def channel_socket(
                     )
                 )
                 continue
-            match message.get("type"):
-                case "ping":
-                    await presence.heartbeat(channel_id, user_id, connection.id)
-                    await connection.send(event("pong"))
-                case "receipt":
-                    await _record_receipt(state, bus, user_id, channel_id, message.get("data"))
-                case "playback.claim":
-                    await players.claim(channel_id, user_id, connection.id)
-                case "playback.claim_if_free":
-                    # Nobody plays any more and no tab of the user has focus: the first asks wins.
-                    await players.claim_if_free(channel_id, user_id, connection.id)
-                case _:
-                    await connection.send(
-                        event("error", code="unknown_event", message="Unknown event type.")
-                    )
+            try:
+                match message.get("type"):
+                    case "ping":
+                        await presence.heartbeat(channel_id, user_id, connection.id)
+                        await connection.send(event("pong"))
+                    case "receipt":
+                        await _record_receipt(state, bus, user_id, channel_id, message.get("data"))
+                    case "playback.claim":
+                        await players.claim(channel_id, user_id, connection.id)
+                    case "playback.claim_if_free":
+                        # Nobody plays and no tab of the user has focus: the first to ask wins.
+                        await players.claim_if_free(channel_id, user_id, connection.id)
+                    case _:
+                        await connection.send(
+                            event("error", code="unknown_event", message="Unknown event type.")
+                        )
+            except (WebSocketDisconnect, RuntimeError):
+                raise
+            except Exception:
+                # One failing event must not end the connection (and with it playback).
+                log.exception("ws.event_failed", event_type=str(message.get("type")))
+                await connection.send(
+                    event("error", code="event_failed", message="This event could not be handled.")
+                )
     except TimeoutError:
         await websocket.close()
     except (WebSocketDisconnect, RuntimeError):

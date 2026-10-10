@@ -17,6 +17,7 @@ function message(overrides: Partial<ChatMessage>): ChatMessage {
     failureReason: null,
     createdAt: '2026-01-01T00:00:00Z',
     receipts: null,
+    transcript: null,
     ...overrides,
   }
 }
@@ -33,6 +34,15 @@ describe('message store', () => {
 
     expect(channel().c1.status).toBe('ready')
     expect(channel().c1.seq).toBe(1)
+  })
+
+  it('keeps a finished transcript when an older copy still says pending', () => {
+    const { upsert, setTranscript } = useMessageStore.getState()
+    upsert([message({ status: 'ready', seq: 1, transcript: { status: 'pending', text: null, lang: null } })])
+    setTranscript('ch', 'm1', { status: 'done', text: 'Hello', lang: 'en' })
+    upsert([message({ status: 'ready', seq: 1, transcript: { status: 'pending', text: null, lang: null } })]) // late history page
+
+    expect(channel().c1.transcript).toEqual({ status: 'done', text: 'Hello', lang: 'en' })
   })
 
   it('drops the local recording once the server has it', () => {

@@ -5,7 +5,7 @@ import { useEffect, useRef } from 'react'
 import { Button } from '@/shared/ui/button'
 import { Spinner } from '@/shared/ui/spinner'
 
-import type { ChatMessage } from '../message-store'
+import type { ChatMessage, Transcript } from '../message-store'
 import { ReceiptDetails } from './receipt-details'
 
 function duration(ms: number | null): string {
@@ -26,6 +26,26 @@ function Waveform({ peaks, own }: { peaks: number[] | null; own: boolean }) {
         />
       ))}
     </div>
+  )
+}
+
+/** The text of a message under its bubble: arrives a moment after the audio. */
+function TranscriptView({ transcript }: { transcript: Transcript }) {
+  const base = 'w-64 max-w-full px-3 text-xs sm:w-72'
+  if (transcript.status === 'pending') {
+    return (
+      <p className={cn(base, 'flex items-center gap-1 text-muted-foreground')}>
+        <Spinner className="size-3" /> Transcribing…
+      </p>
+    )
+  }
+  if (transcript.status === 'failed') return <p className={cn(base, 'text-muted-foreground')}>Transcript unavailable</p>
+  if (!transcript.text) return <p className={cn(base, 'text-muted-foreground')}>No speech detected</p>
+  // lang and dir="auto": right-to-left languages such as Arabic display correctly.
+  return (
+    <p className={cn(base, 'text-foreground/80')} lang={transcript.lang ?? undefined} dir="auto">
+      {transcript.text}
+    </p>
   )
 }
 
@@ -114,6 +134,7 @@ function MessageBubble({ message, own, playing, onPlay, onStop, onRetry }: Bubbl
         <Waveform peaks={message.waveform} own={own} />
         <span className="w-9 shrink-0 text-end text-xs tabular-nums">{duration(message.durationMs)}</span>
       </div>
+      {message.status === 'ready' && message.transcript && <TranscriptView transcript={message.transcript} />}
       {own && (
         <span className="px-3 text-xs text-muted-foreground">
           <Status message={message} onRetry={onRetry} />

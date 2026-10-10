@@ -39,6 +39,7 @@ export async function sendRecording(
     failureReason: null,
     createdAt: retryOf?.createdAt ?? new Date().toISOString(),
     receipts: null,
+    transcript: null,
     upload: blob,
   })
 

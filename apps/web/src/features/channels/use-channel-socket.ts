@@ -5,7 +5,7 @@ import { apiRequest, refreshOnce } from '@/shared/lib/api/client'
 import type { components } from '@/shared/lib/api/schema'
 import { type SocketEvent, type SocketState, socketUrl, WsClient } from '@/shared/lib/ws/ws-client'
 
-import { fromServer, lastSeq, type MessageOut, type ReceiptSummary, useMessageStore } from './message-store'
+import { fromServer, lastSeq, type MessageOut, type ReceiptSummary, type Transcript, useMessageStore } from './message-store'
 import { channelKeys } from './queries'
 
 type MessagePage = components['schemas']['MessagePage']
@@ -94,6 +94,22 @@ export function useChannelSocket(channelId: string, enabled: boolean, handlers: 
         case 'message.ready': {
           const message = data as unknown as MessageOut
           if (message.channel_id === channelId) void receive([message], true)
+          break
+        }
+        case 'message.transcribed': {
+          const done = data as {
+            id: string
+            channel_id: string
+            transcript_status: Transcript['status']
+            transcript: string | null
+            transcript_lang: string | null
+          }
+          if (done.channel_id !== channelId) break
+          store().setTranscript(channelId, done.id, {
+            status: done.transcript_status,
+            text: done.transcript,
+            lang: done.transcript_lang,
+          })
           break
         }
         // processing, failed, receipts and playback come over the user's own topic,

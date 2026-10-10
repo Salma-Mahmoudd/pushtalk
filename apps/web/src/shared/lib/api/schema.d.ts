@@ -335,6 +335,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            transcript_status?: components["schemas"]["TranscriptStatus"] | null;
+            /** Transcript */
+            transcript?: string | null;
+            /** Transcript Lang */
+            transcript_lang?: string | null;
             receipts?: components["schemas"]["ReceiptSummary"] | null;
         };
         /** MessagePage */
@@ -403,6 +408,11 @@ export interface components {
             /** Password */
             password: string;
         };
+        /**
+         * TranscriptStatus
+         * @enum {string}
+         */
+        TranscriptStatus: "pending" | "done" | "failed";
         /** UserOut */
         UserOut: {
             /**

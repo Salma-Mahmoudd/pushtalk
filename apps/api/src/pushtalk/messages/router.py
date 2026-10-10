@@ -6,8 +6,9 @@ from fastapi.responses import FileResponse
 
 from pushtalk.auth.deps import CurrentUserDep
 from pushtalk.channels.router import ChannelServiceDep
-from pushtalk.core.deps import SessionDep, SettingsDep
-from pushtalk.messages.schemas import MessageOut, MessagePage
+from pushtalk.core.deps import RedisDep, SessionDep, SettingsDep
+from pushtalk.messages.receipts import ReceiptService
+from pushtalk.messages.schemas import MessageOut, MessagePage, RecipientReceipt
 from pushtalk.messages.service import MessageService
 from pushtalk.realtime.bus import EventBus
 
@@ -61,3 +62,11 @@ async def message_audio(
     return FileResponse(
         path, media_type="audio/ogg", headers={"Cache-Control": "private, max-age=3600"}
     )
+
+
+@router.get("/api/messages/{message_id}/receipts")
+async def message_receipts(
+    message_id: uuid.UUID, current: CurrentUserDep, session: SessionDep, redis: RedisDep
+) -> list[RecipientReceipt]:
+    """Who received and played one of the caller's messages (sender only)."""
+    return await ReceiptService(session, EventBus(redis)).details(current.user.id, message_id)

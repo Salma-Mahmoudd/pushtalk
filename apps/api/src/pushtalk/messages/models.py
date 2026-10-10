@@ -50,3 +50,20 @@ class Message(Base):
     failure_reason: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MessageReceipt(Base):
+    """What one recipient's app reported about one message (story 7: delivered, then played)."""
+
+    __tablename__ = "message_receipts"
+
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    delivered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    played_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

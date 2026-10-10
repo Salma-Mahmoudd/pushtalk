@@ -216,6 +216,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/messages/{message_id}/receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Message Receipts
+         * @description Who received and played one of the caller's messages (sender only).
+         */
+        get: operations["message_receipts_api_messages__message_id__receipts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -315,6 +335,7 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            receipts?: components["schemas"]["ReceiptSummary"] | null;
         };
         /** MessagePage */
         MessagePage: {
@@ -330,6 +351,29 @@ export interface components {
          * @enum {string}
          */
         MessageStatus: "processing" | "ready" | "failed";
+        /** ReceiptSummary */
+        ReceiptSummary: {
+            /** Delivered */
+            delivered: number;
+            /** Played */
+            played: number;
+            /** Total */
+            total: number;
+        };
+        /** RecipientReceipt */
+        RecipientReceipt: {
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Username */
+            username: string;
+            /** Delivered At */
+            delivered_at: string | null;
+            /** Played At */
+            played_at: string | null;
+        };
         /** SenderOut */
         SenderOut: {
             /**
@@ -773,6 +817,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    message_receipts_api_messages__message_id__receipts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipientReceipt"][];
+                };
             };
             /** @description Validation Error */
             422: {

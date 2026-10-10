@@ -10,7 +10,9 @@ from starlette.types import ASGIApp, Message
 
 
 class WsClient:
-    def __init__(self, app: ASGIApp, path: str, cookies: dict[str, str] | None = None) -> None:
+    def __init__(
+        self, app: ASGIApp, path: str, cookies: dict[str, str] | None = None, query: str = ""
+    ) -> None:
         self._app = app
         cookie = "; ".join(f"{name}={value}" for name, value in (cookies or {}).items())
         self._scope = {
@@ -22,7 +24,7 @@ class WsClient:
             "root_path": "",
             "path": path,
             "raw_path": path.encode(),
-            "query_string": b"",
+            "query_string": query.encode(),
             "headers": [(b"cookie", cookie.encode())] if cookie else [],
             "subprotocols": [],
         }
@@ -66,6 +68,17 @@ class WsClient:
 
     async def send_text(self, text: str) -> None:
         await self._to_app.put({"type": "websocket.receive", "text": text})
+
+    async def events_until(self, type_: str, wait_s: float = 3) -> list[str]:
+        """Types of all events received before the first `type_` event (which ends the list)."""
+        types: list[str] = []
+        while True:
+            message = await self.receive(wait_s)
+            assert message["type"] == "websocket.send", message
+            current = json.loads(message["text"])["type"]
+            if current == type_:
+                return types
+            types.append(current)
 
     async def next_event(
         self,

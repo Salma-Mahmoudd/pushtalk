@@ -22,6 +22,7 @@ from pushtalk.messages.errors import (
     UnsupportedMedia,
 )
 from pushtalk.messages.models import Message, MessageStatus
+from pushtalk.messages.receipts import ReceiptService
 from pushtalk.messages.repository import MessageRepository, to_out
 from pushtalk.messages.schemas import MessageOut, MessagePage
 from pushtalk.realtime.bus import EventBus, event, user_topic
@@ -124,6 +125,16 @@ class MessageService:
             channel_id, after_seq=after_seq, before_seq=before_seq, limit=limit
         )
         pending = await self._messages.list_pending(channel_id, user.id)
+        # Senders see delivered/played counts on their own messages.
+        own = [message.id for message in messages if message.sender.id == user.id]
+        if own:
+            summaries = await ReceiptService(self._session, self._bus).summaries(
+                channel_id, user.id, own
+            )
+            messages = [
+                message.model_copy(update={"receipts": summaries.get(message.id)})
+                for message in messages
+            ]
         return MessagePage(messages=messages, pending=pending, has_more=has_more)
 
     async def audio_path(self, user: User, message_id: uuid.UUID) -> Path:

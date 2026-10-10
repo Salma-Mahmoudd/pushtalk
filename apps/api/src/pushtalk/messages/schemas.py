@@ -11,6 +11,20 @@ class SenderOut(BaseModel):
     username: str
 
 
+class ReceiptSummary(BaseModel):
+    delivered: int
+    played: int
+    # Channel members other than the sender.
+    total: int
+
+
+class RecipientReceipt(BaseModel):
+    user_id: uuid.UUID
+    username: str
+    delivered_at: datetime | None
+    played_at: datetime | None
+
+
 class MessageOut(BaseModel):
     id: uuid.UUID
     channel_id: uuid.UUID
@@ -23,6 +37,8 @@ class MessageOut(BaseModel):
     waveform: list[int] | None
     failure_reason: str | None
     created_at: datetime
+    # Only on the caller's own messages.
+    receipts: ReceiptSummary | None = None
 
 
 class MessagePage(BaseModel):

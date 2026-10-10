@@ -31,3 +31,9 @@ class ProcessingUnavailable(AppError):
     status_code = HTTPStatus.SERVICE_UNAVAILABLE
     code = "service_unavailable"
     message = "Voice messages cannot be processed right now. Please try again."
+
+
+class NotTheSender(AppError):
+    status_code = HTTPStatus.FORBIDDEN
+    code = "not_the_sender"
+    message = "Only the sender can see who received this message."

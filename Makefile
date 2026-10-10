@@ -16,7 +16,7 @@ up: ## Build and start the whole app on http://localhost:8080
 down: ## Stop the app (data is kept)
 	$(COMPOSE_DEV) down
 
-reset: ## Stop the app and delete all data (database, Redis)
+reset: ## Stop the app and delete all data (database, Redis, audio files)
 	$(COMPOSE_DEV) down -v
 
 logs: ## Follow the app logs

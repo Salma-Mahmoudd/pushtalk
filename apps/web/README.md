@@ -43,6 +43,8 @@ src/
     channels/         Sidebar, browse/join, create dialog, channel room with live member presence,
                       message store (keyed by client id, status only moves forward), sending, message list,
                       history paging, catch-up after reconnects, receipts (sent → delivered → played)
+    directs/          Direct messages: sidebar list with online dots, user search dialog, and the
+                      app-wide /ws/me socket (new conversations appear live); rooms reuse channels/
     voice/            Recorder (MediaRecorder), push-to-talk button (pointer or Space, 0.5–60 s),
                       playback queue (autoplay in order) and its audio element player
   shared/
@@ -57,7 +59,7 @@ src/
     brand/            Logo
 ```
 
-Features import from `shared/`, never from each other's internals.
+Features import from `shared/`, never from each other's internals; `app/` composes them (for example, the app shell passes the direct message list into the channel sidebar).
 
 ### Session handling
 

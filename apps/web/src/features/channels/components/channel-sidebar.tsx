@@ -1,4 +1,5 @@
 import { CompassIcon, HashIcon, PlusIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { NavLink } from 'react-router'
 
 import { Logo } from '@/shared/brand/logo'
@@ -19,7 +20,8 @@ import {
 import { useChannels } from '../queries'
 import { CreateChannelDialog } from './create-channel-dialog'
 
-export function ChannelSidebar() {
+/** Navigation, the user's channels, then `children` (sections from other features). */
+export function ChannelSidebar({ children }: { children?: ReactNode }) {
   const { data: channels, isPending } = useChannels()
   const joined = channels?.filter((channel) => channel.is_member) ?? []
 
@@ -79,6 +81,7 @@ export function ChannelSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        {children}
       </SidebarContent>
     </Sidebar>
   )

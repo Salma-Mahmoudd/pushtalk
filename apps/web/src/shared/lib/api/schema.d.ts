@@ -175,6 +175,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Users
+         * @description Usernames starting with `query` (up to 20), to start a conversation with.
+         */
+        get: operations["search_users_api_users_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Directs */
+        get: operations["list_directs_api_dms_get"];
+        put?: never;
+        /**
+         * Open Direct
+         * @description The conversation with a user: 200 if it exists, 201 when created now.
+         */
+        post: operations["open_direct_api_dms_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/channels/{channel_id}/messages": {
         parameters: {
             query?: never;
@@ -278,6 +319,26 @@ export interface components {
             is_member: boolean;
             /** Member Count */
             member_count: number;
+            peer?: components["schemas"]["UserOut"] | null;
+        };
+        /** DirectOpen */
+        DirectOpen: {
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+        };
+        /** DirectOut */
+        DirectOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            peer: components["schemas"]["UserOut"];
+            /** Online */
+            online: boolean;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -728,6 +789,97 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["MemberOut"][];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_users_api_users_get: {
+        parameters: {
+            query: {
+                query: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_directs_api_dms_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectOut"][];
+                };
+            };
+        };
+    };
+    open_direct_api_dms_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DirectOpen"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectOut"];
+                };
+            };
+            /** @description The conversation was created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

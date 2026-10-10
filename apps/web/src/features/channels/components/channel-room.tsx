@@ -1,4 +1,4 @@
-import { HashIcon, LockIcon, MicIcon } from 'lucide-react'
+import { AtSignIcon, HashIcon, LockIcon, MicIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useParams } from 'react-router'
 
@@ -110,6 +110,9 @@ function ChannelRoom({ channelId }: { channelId: string }) {
     )
   }
 
+  // A direct conversation is titled by the other person.
+  const direct = channel.data?.kind === 'direct'
+  const title = direct ? channel.data?.peer?.username : channel.data?.name
   const onlineCount = members.data?.filter((member) => socket.online.has(member.id)).length ?? 0
   const play = (message: ChatMessage) =>
     message.id &&
@@ -120,8 +123,8 @@ function ChannelRoom({ channelId }: { channelId: string }) {
     <div className="flex min-h-0 flex-1">
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b px-4 py-3">
-          <HashIcon className="size-4 text-muted-foreground" />
-          <h1 className="truncate font-semibold">{channel.data?.name}</h1>
+          {direct ? <AtSignIcon className="size-4 text-muted-foreground" /> : <HashIcon className="size-4 text-muted-foreground" />}
+          <h1 className="truncate font-semibold">{title}</h1>
           <div className="ms-auto flex items-center gap-3">
             <SpeedControl />
             <ConnectionStatus state={socket.state} />

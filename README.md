@@ -40,7 +40,7 @@ Phases follow the roadmap in [`specs/README.md`](specs/README.md).
 | --- | --- |
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2 (async), Alembic |
 | Jobs and realtime | Celery + Redis (broker, pub/sub), Flower |
-| Storage | PostgreSQL, MinIO (S3) |
+| Storage | PostgreSQL; audio files on a Docker volume |
 | Frontend | React + TypeScript, Vite, Tailwind CSS, shadcn/ui, Zustand, TanStack Query |
 | Edge and runtime | nginx, Docker Compose |
 

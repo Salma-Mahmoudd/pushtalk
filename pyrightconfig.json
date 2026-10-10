@@ -1,0 +1,6 @@
+{
+  "venvPath": "apps/api",
+  "venv": ".venv",
+  "include": ["apps/api/src", "apps/api/tests"],
+  "typeCheckingMode": "off"
+}

@@ -12,6 +12,7 @@ AI tools used: **Claude Code** (Anthropic), an AI coding assistant working in th
 | Tests | Writing the pytest and Vitest suites, and running headless Chrome checks of the full flows (two and three users, real speech as microphone input, offline and reconnect, two tabs) during development |
 | Debugging | Investigating failures found by those checks, for example: nginx keeping a stale API address after a restart, a PyAV release incompatible with faster-whisper, the recording timer resetting on re-renders, rate limits keyed by the proxy's address, and the allowed origin not following `WEB_PORT` |
 | Documentation | READMEs, the environment setup guide and code comments |
+| Demo video | A script that drives four browsers through every scenario on a fresh stack and assembles the video, with on-screen notes and the voice messages as they played. The voice in it is a public speech sample (from the faster-whisper test data) used as the microphone input |
 
 ## How the output was checked
 

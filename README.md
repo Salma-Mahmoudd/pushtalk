@@ -97,8 +97,8 @@ make test       # API (pytest) and web (Vitest); the API tests need `make dev` o
 make lint       # ruff, mypy (strict), ESLint, TypeScript
 ```
 
-- **API (135 tests):** auth (sign-up, log-in, refresh rotation and reuse detection, log-out, CSRF), upload validation (oversized, renamed text file, too short and too long, corrupt audio, non-member, retried upload, queue down), the worker job with real ffmpeg (ready, ordering, failure, idempotency, retries), catch-up, receipts, playback ownership, presence, rate limits, transcription (job, providers, decoding), and direct messages (privacy, races, search). They run against a real PostgreSQL test database, each test inside a rolled-back transaction.
-- **Web (40 tests):** the playback queue in isolation (order, one at a time, duplicates, own messages, locked, recording, errors, tabs, speed), the WebSocket client (backoff, online and offline, 4401 and 4403), backoff bounds and the message store.
+- **API (140 tests):** auth (sign-up, log-in, refresh rotation and reuse detection, log-out, CSRF), upload validation (oversized, renamed text file, too short and too long, corrupt audio, non-member, retried upload, queue down), the worker job with real ffmpeg (ready, ordering, failure, idempotency, retries), catch-up, receipts (including two tabs reporting at once), playback ownership (one playing tab, joining and reconnecting tabs), presence, rate limits, transcription (job, providers, decoding), and direct messages (privacy, races, search). They run against a real PostgreSQL test database, each test inside a rolled-back transaction.
+- **Web (42 tests):** the playback queue in isolation (order, one at a time, duplicates, own messages, locked, recording, errors, tabs, messages played elsewhere, speed), the WebSocket client (backoff, online and offline, 4401 and 4403), backoff bounds and the message store.
 
 ## Known limitations
 

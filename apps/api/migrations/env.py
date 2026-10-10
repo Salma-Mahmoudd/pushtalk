@@ -7,6 +7,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from pushtalk.core.config import get_settings
+from pushtalk.db import models  # noqa: F401  (registers every table on Base.metadata)
 from pushtalk.db.base import Base
 
 # this is the Alembic Config object, which provides
@@ -16,11 +17,14 @@ config = context.config
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Keep loggers configured by the caller (e.g. the test suite) working.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
-# The database address comes from DATABASE_URL (pushtalk.core.config), never from alembic.ini.
+# The database address comes from DATABASE_URL (pushtalk.core.config), never from alembic.ini,
+# unless the caller already set one (the test suite migrates a separate test database).
 # "%" is escaped because the config file format treats it as a placeholder marker.
-config.set_main_option("sqlalchemy.url", str(get_settings().database_url).replace("%", "%%"))
+if not config.get_main_option("sqlalchemy.url"):
+    config.set_main_option("sqlalchemy.url", str(get_settings().database_url).replace("%", "%%"))
 
 # Metadata of every model, compared against the database by `alembic revision --autogenerate`.
 target_metadata = Base.metadata

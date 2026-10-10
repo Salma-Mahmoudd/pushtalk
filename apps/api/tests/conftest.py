@@ -2,13 +2,18 @@ from collections.abc import AsyncIterator, Callable
 from http import HTTPStatus
 
 import pytest
+from fakeredis import FakeAsyncRedis
 from fastapi import FastAPI, WebSocket
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from pushtalk.core.config import Settings
 from pushtalk.core.errors import AppError
+from pushtalk.infra.rate_limit import RateLimiter
 from pushtalk.main import create_app
+from tests.db import prepare_test_database
 
 ALLOWED_ORIGIN = "http://app.test"
 
@@ -31,7 +36,8 @@ def allowed_origin() -> str:
 
 @pytest.fixture
 def settings(allowed_origin: str) -> Settings:
-    return Settings(allowed_origins=[allowed_origin])
+    # The test client talks plain http://test, which never sends Secure cookies.
+    return Settings(allowed_origins=[allowed_origin], cookie_secure=False)
 
 
 async def _passing_check() -> None:
@@ -83,5 +89,54 @@ def app(app_factory: Callable[[], FastAPI]) -> FastAPI:
 async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     # raise_app_exceptions=False: return the 500 response instead of re-raising the crash.
     transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as http_client:
+        yield http_client
+
+
+@pytest.fixture(scope="session")
+def test_database_url() -> str:
+    url = prepare_test_database(Settings())
+    if url is None:
+        pytest.skip("PostgreSQL is not running; start it with `make services`")
+    return url
+
+
+@pytest.fixture
+async def db_sessionmaker(
+    test_database_url: str,
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """Sessions inside one outer transaction that is rolled back after the test.
+
+    Commits in the code under test only release savepoints, so every test starts clean.
+    """
+    engine = create_async_engine(test_database_url, poolclass=NullPool)
+    async with engine.connect() as connection:
+        transaction = await connection.begin()
+        yield async_sessionmaker(
+            bind=connection, expire_on_commit=False, join_transaction_mode="create_savepoint"
+        )
+        await transaction.rollback()
+    await engine.dispose()
+
+
+@pytest.fixture
+def fake_redis() -> FakeAsyncRedis:
+    return FakeAsyncRedis(decode_responses=True)
+
+
+@pytest.fixture
+def db_app(
+    app: FastAPI, db_sessionmaker: async_sessionmaker[AsyncSession], fake_redis: FakeAsyncRedis
+) -> FastAPI:
+    """The test app on the test database, with an in-memory Redis."""
+    app.state.sessionmaker = db_sessionmaker
+    app.state.redis = fake_redis
+    app.state.rate_limiter = RateLimiter(fake_redis)
+    return app
+
+
+@pytest.fixture
+async def db_client(db_app: FastAPI) -> AsyncIterator[AsyncClient]:
+    transport = ASGITransport(app=db_app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as http_client:
         yield http_client

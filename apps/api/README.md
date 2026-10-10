@@ -34,18 +34,30 @@ The API reads `DATABASE_URL` and `REDIS_URL` (defaults match those containers; s
 src/pushtalk/
   main.py         App factory (create_app): logging, error handlers, middleware, routers
   health.py       GET /api/health: checks PostgreSQL and Redis (503 + details if one is down)
+  auth/           Sign up, log in, refresh, log out, /me (see specs/auth/plan.md)
+    models.py     users, refresh_tokens
+    schemas.py    Request and response bodies
+    repository.py Database access for users and refresh tokens
+    service.py    Rules: hashing, rotation, reuse detection, logout
+    router.py     /api/auth endpoints; a failed refresh clears the cookies
+    deps.py       get_current_user: the guard for protected endpoints
   core/
     config.py     Settings from environment variables (see ../../.env.example)
     logging.py    JSON logs to stdout for structlog and uvicorn
     errors.py     AppError and the error envelope for every non-2xx response
     middleware.py Request id + request log; Origin check (CSRF) for unsafe requests and WebSockets
+    security.py   argon2id passwords, JWT access tokens, refresh tokens, auth cookies
+    deps.py       Request dependencies: settings, database session, Redis, rate limiter
   db/
     base.py       Declarative Base with constraint naming rules (used by Alembic)
+    models.py     Imports every model so Alembic sees all tables
     session.py    Async SQLAlchemy engine
   infra/
     redis.py      Async Redis client
+    rate_limit.py Redis sliding-window rate limiter (429 + Retry-After)
 migrations/       Alembic (async template); env.py reads DATABASE_URL
-tests/            pytest suite; tests/integration/ uses the real PostgreSQL and Redis
+tests/            pytest suite; database tests use a migrated `pushtalk_test` database
+                  (each test rolled back) and are skipped when PostgreSQL is not running
 ```
 
 Every error response has the same shape:

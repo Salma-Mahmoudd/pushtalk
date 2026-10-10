@@ -10,6 +10,8 @@ x-api: &api
     LOG_LEVEL: ${LOG_LEVEL:-INFO}
     LOG_FORMAT: ${LOG_FORMAT:-json}
     ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080,http://localhost:5173}
+    JWT_SECRET: ${JWT_SECRET:-dev-insecure-change-me-local-development-only}
+    COOKIE_SECURE: ${COOKIE_SECURE:-true}
 
 services:
   postgres:

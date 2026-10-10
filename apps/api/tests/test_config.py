@@ -23,3 +23,17 @@ def test_invalid_log_level_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(ValidationError):
         Settings()
+
+
+def test_short_jwt_secret_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JWT_SECRET", "too-short")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_malformed_rate_limit_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RATE_LIMIT_LOGIN_IP", "lots")
+
+    with pytest.raises(ValidationError):
+        Settings()

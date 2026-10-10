@@ -9,13 +9,17 @@ from pushtalk.channels.models import Channel, ChannelKind
 from pushtalk.channels.presence import PresenceService
 from pushtalk.channels.repository import ChannelRepository
 from pushtalk.channels.schemas import ChannelOut, MemberOut
+from pushtalk.realtime.bus import EventBus, channel_topic, event
 
 
 class ChannelService:
-    def __init__(self, session: AsyncSession, presence: PresenceService) -> None:
+    def __init__(
+        self, session: AsyncSession, presence: PresenceService, bus: EventBus | None = None
+    ) -> None:
         self._session = session
         self._channels = ChannelRepository(session)
         self._presence = presence
+        self._bus = bus
 
     async def create(self, user: User, name: str) -> ChannelOut:
         channel = Channel(kind=ChannelKind.group, name=name, created_by=user.id)
@@ -48,8 +52,14 @@ class ChannelService:
             raise ChannelNotFound()
         if channel.kind is ChannelKind.direct:
             raise CannotJoinDirect()
-        await self._channels.add_member(channel_id, user.id)
+        joined = await self._channels.add_member(channel_id, user.id)
         await self._session.commit()
+        if joined and self._bus is not None:
+            # Open rooms refresh their member list.
+            await self._bus.publish(
+                channel_topic(channel_id),
+                event("member.joined", user_id=str(user.id), username=user.username),
+            )
 
     async def require_member(self, user_id: uuid.UUID, channel_id: uuid.UUID) -> Channel:
         channel = await self._channels.get(channel_id)

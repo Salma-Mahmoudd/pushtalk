@@ -8,13 +8,14 @@ from pushtalk.channels.presence import PresenceService
 from pushtalk.channels.schemas import ChannelCreate, ChannelOut, MemberOut
 from pushtalk.channels.service import ChannelService
 from pushtalk.core.deps import SessionDep
+from pushtalk.realtime.bus import EventBus
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
 
 def get_channel_service(request: Request, session: SessionDep) -> ChannelService:
     presence: PresenceService = request.app.state.presence
-    return ChannelService(session, presence)
+    return ChannelService(session, presence, EventBus(request.app.state.redis))
 
 
 ChannelServiceDep = Annotated[ChannelService, Depends(get_channel_service)]

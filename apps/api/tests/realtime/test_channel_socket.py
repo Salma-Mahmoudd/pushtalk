@@ -109,3 +109,20 @@ async def test_logout_closes_that_sessions_sockets(db_app: FastAPI, db_client: A
         await db_client.post("/api/auth/logout")
 
         assert await ws.closed_with() == 4401
+
+
+async def test_joining_announces_the_new_member(
+    db_app: FastAPI, db_client: AsyncClient, make_client: Callable[[], AsyncClient]
+) -> None:
+    await signup(db_client, "alice")
+    channel = await create_channel(db_client, "general")
+    bob_client = make_client()
+    bob = await signup(bob_client, "bob")
+
+    async with WsClient(db_app, f"/ws/channels/{channel['id']}", _cookies(db_client)) as ws:
+        await ws.accepted()
+        await ws.next_event("presence.snapshot")
+
+        await bob_client.post(f"/api/channels/{channel['id']}/join")
+        joined = await ws.next_event("member.joined")
+        assert joined["data"] == {"user_id": bob["id"], "username": "bob"}

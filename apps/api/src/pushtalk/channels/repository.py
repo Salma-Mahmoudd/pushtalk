@@ -19,13 +19,15 @@ class ChannelRepository:
         self._session.add(channel)
         await self._session.flush()
 
-    async def add_member(self, channel_id: uuid.UUID, user_id: uuid.UUID) -> None:
-        """Idempotent: joining twice is not an error."""
-        await self._session.execute(
+    async def add_member(self, channel_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+        """Idempotent: joining twice is not an error. True if the user was not a member yet."""
+        added = await self._session.scalar(
             insert(ChannelMember)
             .values(channel_id=channel_id, user_id=user_id)
             .on_conflict_do_nothing()
+            .returning(ChannelMember.user_id)
         )
+        return added is not None
 
     async def is_member(self, channel_id: uuid.UUID, user_id: uuid.UUID) -> bool:
         return bool(

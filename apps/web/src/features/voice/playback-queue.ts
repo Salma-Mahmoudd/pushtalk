@@ -134,8 +134,9 @@ export class PlaybackQueue {
 
   snapshot(): QueueSnapshot {
     let state: QueueState = 'idle'
-    if (this.locked) state = 'locked'
-    else if (!this.active) state = 'inactive'
+    // Inactive first: a silent tab offers "Play here" even before its first tap (the tap unlocks too).
+    if (!this.active) state = 'inactive'
+    else if (this.locked) state = 'locked'
     else if (this.recording && this.current) state = 'suspended'
     else if (this.current) state = 'playing'
     return { state, currentId: this.current?.id ?? null, waiting: this.items.length, recording: this.recording }

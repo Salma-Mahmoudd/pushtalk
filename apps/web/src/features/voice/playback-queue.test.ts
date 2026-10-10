@@ -215,4 +215,13 @@ describe('PlaybackQueue', () => {
     expect(player.played).toEqual(['/a/1', '/a/2'])
     expect(player.rate).toBe(1.5)
   })
+
+  it('reports a silent tab as inactive even before its first tap', () => {
+    const locked = new PlaybackQueue({ player: new FakeAudioPlayer() })
+    locked.setActive(false)
+
+    expect(locked.snapshot().state).toBe('inactive')
+    locked.setActive(true)
+    expect(locked.snapshot().state).toBe('locked')
+  })
 })

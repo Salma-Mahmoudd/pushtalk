@@ -249,6 +249,8 @@ Idle --> Inactive : setActive(false)\n(another tab plays)
 Playing --> Inactive : setActive(false)\n(stop; item goes back in line)
 Inactive --> Playing : setActive(true) & queue not empty
 Inactive --> Idle : setActive(true) & queue empty
+Locked --> Inactive : setActive(false)\n("Play here" shows before the first tap)
+Inactive --> Locked : setActive(true) & no tap yet
 
 legend right
   **Invariants**

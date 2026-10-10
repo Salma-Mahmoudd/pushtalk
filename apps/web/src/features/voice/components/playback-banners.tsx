@@ -1,4 +1,4 @@
-import { MonitorSpeakerIcon, Volume2Icon } from 'lucide-react'
+import { HourglassIcon, MonitorSpeakerIcon, Volume2Icon } from 'lucide-react'
 
 import { Button } from '@/shared/ui/button'
 
@@ -29,5 +29,17 @@ export function PlayHereBanner({ snapshot, onPlayHere }: { snapshot: QueueSnapsh
         Play here
       </Button>
     </div>
+  )
+}
+
+/** Half-duplex: while the user talks, incoming messages wait; say how many. */
+export function HeldWhileTalkingBadge({ snapshot }: { snapshot: QueueSnapshot }) {
+  const held = snapshot.waiting + (snapshot.currentId ? 1 : 0)
+  if (!snapshot.recording || held === 0) return null
+  return (
+    <p className="flex items-center justify-center gap-2 pt-2 text-xs text-muted-foreground" role="status">
+      <HourglassIcon className="size-3.5" />
+      {held === 1 ? '1 message waits' : `${held} messages wait`} until you release.
+    </p>
   )
 }

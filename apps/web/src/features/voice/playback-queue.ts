@@ -30,6 +30,8 @@ export interface QueueSnapshot {
   state: QueueState
   currentId: string | null
   waiting: number
+  /** The user is talking: incoming messages are held until the button is released. */
+  recording: boolean
 }
 
 interface QueueOptions {
@@ -136,7 +138,7 @@ export class PlaybackQueue {
     else if (!this.active) state = 'inactive'
     else if (this.recording && this.current) state = 'suspended'
     else if (this.current) state = 'playing'
-    return { state, currentId: this.current?.id ?? null, waiting: this.items.length }
+    return { state, currentId: this.current?.id ?? null, waiting: this.items.length, recording: this.recording }
   }
 
   private insert(item: QueueItem): void {

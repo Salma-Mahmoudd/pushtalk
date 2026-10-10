@@ -124,7 +124,7 @@ describe('PlaybackQueue', () => {
 
     queue.recordingStarted()
     expect(player.pause).toHaveBeenCalled()
-    expect(queue.snapshot().state).toBe('suspended')
+    expect(queue.snapshot()).toMatchObject({ state: 'suspended', recording: true })
 
     queue.recordingStopped()
     expect(player.resume).toHaveBeenCalled()

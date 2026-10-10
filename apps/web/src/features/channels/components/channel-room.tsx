@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useParams } from 'react-router'
 
 import { useAuthStore } from '@/features/auth/store'
-import { AudioUnlockBanner, PlayHereBanner } from '@/features/voice/components/playback-banners'
+import { AudioUnlockBanner, HeldWhileTalkingBadge, PlayHereBanner } from '@/features/voice/components/playback-banners'
 import { PttButton } from '@/features/voice/components/ptt-button'
 import { SpeedControl } from '@/features/voice/components/speed-control'
 import type { QueueItem } from '@/features/voice/playback-queue'
@@ -162,6 +162,7 @@ function ChannelRoom({ channelId }: { channelId: string }) {
             </EmptyHeader>
           </Empty>
         )}
+        <HeldWhileTalkingBadge snapshot={snapshot} />
         <PttButton
           disabled={!user}
           onRecordingChange={(recording) => (recording ? queue.recordingStarted() : queue.recordingStopped())}

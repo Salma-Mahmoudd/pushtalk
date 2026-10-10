@@ -8,7 +8,12 @@ import { usePlaybackSettings } from './playback-settings'
 
 /** One playback queue for the open room; the first tap or key press anywhere unlocks audio. */
 export function usePlayback(onPlayed: (item: QueueItem) => void): { queue: PlaybackQueue; snapshot: QueueSnapshot } {
-  const [snapshot, setSnapshot] = useState<QueueSnapshot>({ state: 'locked', currentId: null, waiting: 0 })
+  const [snapshot, setSnapshot] = useState<QueueSnapshot>({
+    state: 'locked',
+    currentId: null,
+    waiting: 0,
+    recording: false,
+  })
   const [queue] = useState(
     () =>
       new PlaybackQueue({

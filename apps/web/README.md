@@ -13,6 +13,8 @@ Run from `apps/web/` (Node and pnpm versions: see [`../../steps/environment-setu
 | `pnpm build` | Type-check and build optimised static files into `dist/` |
 | `pnpm preview` | Serve the built `dist/` locally to check a production build |
 | `pnpm lint` | ESLint |
+| `pnpm test` | Unit tests (Vitest) |
+| `make types` (repository root) | Regenerate `src/shared/lib/api/schema.d.ts` from the API's OpenAPI description |
 
 `pnpm dev` forwards `/api` to the API (`API_PROXY_TARGET`, default `http://localhost:8001`, the API started by `make dev`), so the browser sees one origin, as with nginx in production.
 
@@ -27,8 +29,31 @@ In Docker, the `web` image builds the app and nginx serves `dist/` ([`nginx/defa
   pnpm dlx shadcn@latest add dialog
   ```
 
-- **Theme:** [tweakcn Twitter](https://tweakcn.com/) in light and dark, Open Sans (self-hosted). `src/shared/theme/` holds the provider (`next-themes`: light, dark or system, saved in `localStorage`) and the toggle. `public/theme-init.js` applies the saved theme before the first paint.
+- **Theme:** [tweakcn Twitter](https://tweakcn.com/) in light and dark, Open Sans (self-hosted). One change: a darker light-mode `--input`, so field outlines stay visible. `src/shared/theme/` holds the provider (`next-themes`: light, dark or system, saved in `localStorage`) and the toggle. `public/theme-init.js` applies the saved theme before the first paint.
 - Imports use the `@/` alias for `src/` (for example `@/shared/ui/button`).
+
+## Layout
+
+```text
+src/
+  main.tsx            Entry: theme provider + app
+  app/                App level: router, session start-up, logged-in shell (header, log out)
+  features/
+    auth/             API calls, session store, refresh + tab sync, log-in/sign-up pages, route guards
+    channels/         Channel pages
+  shared/
+    lib/api/          API client (cookies, error envelope → ApiError, one refresh for concurrent 401s)
+                      and schema.d.ts, generated from the API (never edited by hand)
+    ui/               shadcn/ui components
+    theme/            Light/dark/system provider and toggle
+    brand/            Logo
+```
+
+Features import from `shared/`, never from each other's internals.
+
+### Session handling
+
+Tokens live in httpOnly cookies and are never readable by JavaScript; the app only knows when the access cookie expires. `features/auth/session.ts` refreshes a minute before that, and the API client refreshes after any 401 and retries once. Tabs share one session: a Web Lock lets one tab refresh at a time, and a `BroadcastChannel` passes logins, refreshes and logouts to the other tabs.
 
 ## Configuration
 

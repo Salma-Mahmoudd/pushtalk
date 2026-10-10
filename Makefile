@@ -4,7 +4,7 @@ COMPOSE_DEV := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 PLANTUML    := plantuml/plantuml:1.2025.4
 
 .DEFAULT_GOAL := help
-.PHONY: help up down reset logs ps dev services migrate migration test test-api test-web lint diagrams
+.PHONY: help up down reset logs ps dev services migrate migration types test test-api test-web lint diagrams
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
@@ -37,13 +37,19 @@ migrate: ## Apply database migrations (services must be running)
 migration: ## Create a migration from model changes: make migration m="add users"
 	cd apps/api && uv run alembic revision --autogenerate -m "$(m)"
 
+types: ## Regenerate the web app's API types from the API's OpenAPI description
+	cd apps/api && uv run python -c "import json, sys; from pushtalk.main import create_app; \
+		open(sys.argv[1], 'w').write(json.dumps(create_app().openapi()))" ../web/openapi.json
+	cd apps/web && pnpm exec openapi-typescript openapi.json -o src/shared/lib/api/schema.d.ts \
+		&& rm openapi.json
+
 test: test-api test-web ## Run all tests
 
 test-api: ## API tests (integration tests need `make services`)
 	cd apps/api && uv run pytest
 
-test-web: ## Web checks: type check and build
-	cd apps/web && pnpm build
+test-web: ## Web tests (vitest), then type check and build
+	cd apps/web && pnpm test && pnpm build
 
 lint: ## Lint and type-check both apps
 	cd apps/api && uv run ruff check . && uv run ruff format --check . && uv run mypy

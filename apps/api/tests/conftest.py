@@ -34,9 +34,18 @@ def settings(allowed_origin: str) -> Settings:
     return Settings(allowed_origins=[allowed_origin])
 
 
+async def _passing_check() -> None:
+    return None
+
+
 def _build_app(settings: Settings) -> FastAPI:
-    """The real app plus test-only routes that trigger each error path."""
+    """The real app plus test-only routes that trigger each error path.
+
+    Health checks are replaced with passing fakes, so unit tests never need PostgreSQL or Redis;
+    tests/integration/ covers the real connections.
+    """
     application = create_app(settings)
+    application.state.health_checks = {"database": _passing_check, "redis": _passing_check}
 
     @application.post("/api/test/items")
     async def create_item(item: Item) -> Item:

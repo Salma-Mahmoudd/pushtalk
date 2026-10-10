@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import field_validator
+from pydantic import PostgresDsn, RedisDsn, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -9,6 +9,12 @@ class Settings(BaseSettings):
     """Every value comes from an environment variable; defaults suit local development."""
 
     model_config = SettingsConfigDict(frozen=True, extra="ignore")
+
+    # Defaults match docker-compose.dev.yml, for running the API outside Docker.
+    database_url: PostgresDsn = PostgresDsn(
+        "postgresql+asyncpg://pushtalk:pushtalk@localhost:5433/pushtalk"
+    )
+    redis_url: RedisDsn = RedisDsn("redis://localhost:6380/0")
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["json", "console"] = "json"

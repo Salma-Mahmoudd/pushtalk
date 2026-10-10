@@ -84,11 +84,12 @@ async def test_receipts_reach_the_sender_and_ignore_repeats(
             await bob_ws.accepted()
             await bob_ws.next_event("presence.snapshot")
 
-            receipt = {"type": "receipt", "data": {"message_id": first, "status": "delivered"}}
-            await bob_ws.send_json(receipt)
+            delivered_report = {"message_id": first, "status": "delivered"}
+            played_report = {"message_id": first, "status": "played"}
+            await bob_ws.send_json({"type": "receipt", "data": delivered_report})
             delivered = await alice_ws.next_event("receipt.updated")
-            await bob_ws.send_json(receipt)  # repeated: ignored
-            await bob_ws.send_json({**receipt, "data": {**receipt["data"], "status": "played"}})
+            await bob_ws.send_json({"type": "receipt", "data": delivered_report})  # ignored
+            await bob_ws.send_json({"type": "receipt", "data": played_report})
             played = await alice_ws.next_event("receipt.updated")
 
     assert delivered["data"] | {"recipient": None} == {

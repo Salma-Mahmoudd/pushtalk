@@ -21,6 +21,7 @@ from pushtalk.core.security import (
     new_refresh_token,
     verify_password,
 )
+from pushtalk.realtime.bus import EventBus, event, user_topic
 
 log = structlog.get_logger(__name__)
 
@@ -106,7 +107,7 @@ class AuthService:
             grace = timedelta(seconds=self._settings.refresh_reuse_grace_s)
             if now - token.rotated_at > grace:
                 # An old token came back: someone else may hold this session. End all of it.
-                await self._revoke_session(token.family_id, now)
+                await self._revoke_session(token, now)
                 await self._session.commit()
                 log.warning(
                     "auth.refresh_reuse_detected",
@@ -132,7 +133,7 @@ class AuthService:
             return
         token = await self._tokens.get_by_hash_for_update(hash_refresh_token(raw_token))
         if token is not None:
-            await self._revoke_session(token.family_id, self._clock())
+            await self._revoke_session(token, self._clock())
             await self._session.commit()
             log.info("auth.logout", user_id=str(token.user_id), session_id=str(token.family_id))
 
@@ -168,11 +169,15 @@ class AuthService:
         )
         return issued, refresh
 
-    async def _revoke_session(self, session_id: uuid.UUID, now: datetime) -> None:
-        await self._tokens.revoke_family(session_id, now)
+    async def _revoke_session(self, token: RefreshToken, now: datetime) -> None:
+        await self._tokens.revoke_family(token.family_id, now)
         # Access tokens are not stored; this marker rejects them until they expire anyway.
         await self._redis.set(
-            revoked_session_key(session_id),
+            revoked_session_key(token.family_id),
             "1",
             ex=self._settings.access_token_ttl_min * 60,
+        )
+        # Open WebSockets of this session close on every API process.
+        await EventBus(self._redis).publish(
+            user_topic(token.user_id), event("session.revoked", session_id=str(token.family_id))
         )

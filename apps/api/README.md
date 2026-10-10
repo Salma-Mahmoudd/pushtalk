@@ -34,6 +34,16 @@ The API reads `DATABASE_URL` and `REDIS_URL` (defaults match those containers; s
 src/pushtalk/
   main.py         App factory (create_app): logging, error handlers, middleware, routers
   health.py       GET /api/health: checks PostgreSQL and Redis (503 + details if one is down)
+  channels/       Channels, membership and presence (see specs/chat/plan.md)
+    models.py     channels, channel_members
+    presence.py   Online users: one expiring Redis entry per connection
+    service.py    Create, list, join, members; membership checks
+    router.py     /api/channels endpoints
+  realtime/       WebSockets
+    router.py     /ws/channels/{id}: cookie auth (4401), membership (4403), presence, ping
+    manager.py    This process's sockets and their Redis pub/sub subscriptions
+    bus.py        Event envelope and publishing to Redis topics
+    sweeper.py    Announces users whose connections stopped sending heartbeats
   auth/           Sign up, log in, refresh, log out, /me (see specs/auth/plan.md)
     models.py     users, refresh_tokens
     schemas.py    Request and response bodies

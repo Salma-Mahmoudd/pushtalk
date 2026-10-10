@@ -16,9 +16,9 @@ Run from `apps/web/` (Node and pnpm versions: see [`../../steps/environment-setu
 | `pnpm test` | Unit tests (Vitest) |
 | `make types` (repository root) | Regenerate `src/shared/lib/api/schema.d.ts` from the API's OpenAPI description |
 
-`pnpm dev` forwards `/api` to the API (`API_PROXY_TARGET`, default `http://localhost:8001`, the API started by `make dev`), so the browser sees one origin, as with nginx in production.
+`pnpm dev` forwards `/api` and `/ws` to the API (`API_PROXY_TARGET`, default `http://localhost:8001`, the API started by `make dev`), so the browser sees one origin, as with nginx in production.
 
-In Docker, the `web` image builds the app and nginx serves `dist/` ([`nginx/default.conf`](nginx/default.conf)): `/api/` is proxied to the API, hashed assets are cached for a year, and every response carries a Content-Security-Policy that allows only same-origin scripts ([`nginx/security-headers.conf`](nginx/security-headers.conf)). For that reason the pre-paint theme script lives in `public/theme-init.js` instead of inline in `index.html`.
+In Docker, the `web` image builds the app and nginx serves `dist/` ([`nginx/default.conf`](nginx/default.conf)): `/api/` and `/ws/` (WebSocket upgrade, 1 h idle timeout) are proxied to the API, hashed assets are cached for a year, and every response carries a Content-Security-Policy that allows only same-origin scripts ([`nginx/security-headers.conf`](nginx/security-headers.conf)). For that reason the pre-paint theme script lives in `public/theme-init.js` instead of inline in `index.html`.
 
 ## UI
 
@@ -60,7 +60,7 @@ Tokens live in httpOnly cookies and are never readable by JavaScript; the app on
 | Variable | Default | Used for |
 | --- | --- | --- |
 | `VITE_SITE_URL` | `http://localhost:8080` | Absolute address in the social-preview tags (`og:url`, `og:image`) of `index.html` |
-| `API_PROXY_TARGET` | `http://localhost:8001` | Where `pnpm dev` forwards `/api` |
+| `API_PROXY_TARGET` | `http://localhost:8001` | Where `pnpm dev` forwards `/api` and `/ws` |
 
 ## Brand assets
 

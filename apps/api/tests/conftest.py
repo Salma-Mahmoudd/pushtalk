@@ -11,8 +11,7 @@ from sqlalchemy.pool import NullPool
 
 from pushtalk.core.config import Settings
 from pushtalk.core.errors import AppError
-from pushtalk.infra.rate_limit import RateLimiter
-from pushtalk.main import create_app
+from pushtalk.main import attach_redis, create_app
 from tests.db import prepare_test_database
 
 ALLOWED_ORIGIN = "http://app.test"
@@ -125,14 +124,14 @@ def fake_redis() -> FakeAsyncRedis:
 
 
 @pytest.fixture
-def db_app(
+async def db_app(
     app: FastAPI, db_sessionmaker: async_sessionmaker[AsyncSession], fake_redis: FakeAsyncRedis
-) -> FastAPI:
+) -> AsyncIterator[FastAPI]:
     """The test app on the test database, with an in-memory Redis."""
     app.state.sessionmaker = db_sessionmaker
-    app.state.redis = fake_redis
-    app.state.rate_limiter = RateLimiter(fake_redis)
-    return app
+    attach_redis(app, fake_redis)
+    yield app
+    await app.state.connections.close()
 
 
 @pytest.fixture
@@ -140,3 +139,19 @@ async def db_client(db_app: FastAPI) -> AsyncIterator[AsyncClient]:
     transport = ASGITransport(app=db_app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as http_client:
         yield http_client
+
+
+@pytest.fixture
+async def make_client(db_app: FastAPI) -> AsyncIterator[Callable[[], AsyncClient]]:
+    """Extra clients on the same app, each with its own cookies (one per user)."""
+    clients: list[AsyncClient] = []
+
+    def factory() -> AsyncClient:
+        transport = ASGITransport(app=db_app, raise_app_exceptions=False)
+        client = AsyncClient(transport=transport, base_url="http://test")
+        clients.append(client)
+        return client
+
+    yield factory
+    for client in clients:
+        await client.aclose()

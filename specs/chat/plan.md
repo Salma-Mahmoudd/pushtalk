@@ -71,10 +71,11 @@ Envelope: `{ "type": "...", "data": {...} }`
 | S→C | `member.joined` | `{user_id, username}`; rooms refresh their member list |
 | S→C | `receipt.updated` | `{message_id, channel_id, delivered, played, total, recipient: {user_id, username, delivered_at, played_at}}`, sender only |
 | S→C | `message.transcribed` | `{id, channel_id, transcript_status: "done"\|"failed", transcript, transcript_lang}` |
-| S→C | `playback.claimed` | `{channel_id, connection_id}`: the connection that plays now (`null`: nobody) |
+| S→C | `playback.claimed` | `{channel_id, connection_id}`: the connection that plays now (`null`: nobody); also sent to every new connection right after `hello` |
 | S→C | `error` | `{code, message}`, e.g. `rate_limited` (event dropped) or `unknown_event` |
 | C→S | `receipt` | `{message_id, status: "delivered"\|"played"}`, or `{message_ids: [...], status}` for up to 200 at once (a catch-up) |
-| C→S | `playback.claim` | — |
+| C→S | `playback.claim` | — (sent on open and on focus) |
+| C→S | `playback.claim_if_free` | — (after `playback.claimed {connection_id: null}` in a tab without focus; only the first wins) |
 | C→S | `ping` → S→C `pong` | keep-alive every 25 s |
 
 User-scoped socket **`/ws/me`** (open while logged in, same cookie auth and backoff client) carries `dm.created {channel_id}` so new DMs appear without a refresh, and keeps the app-wide presence behind the online dots of direct conversations. A client may send 30 events a second per connection.

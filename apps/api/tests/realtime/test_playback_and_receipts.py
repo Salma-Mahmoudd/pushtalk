@@ -9,6 +9,7 @@ from httpx import AsyncClient
 from pushtalk.core.security import ACCESS_COOKIE
 from pushtalk.messages.processing import ProcessingContext, process_message
 from pushtalk.realtime.bus import EventBus
+from pushtalk.realtime.players import PlayerRegistry
 from tests.helpers import create_channel, signup
 from tests.recordings import make_recording, requires_ffmpeg
 from tests.ws import WsClient
@@ -162,6 +163,51 @@ async def test_last_focused_tab_becomes_the_player(
             "playback.claimed", lambda data: data["connection_id"] is None
         )
         assert released["data"]["connection_id"] is None
+
+
+async def test_a_tab_joining_while_another_plays_learns_it_must_stay_silent(
+    db_app: FastAPI, db_client: AsyncClient, room: dict[str, Any]
+) -> None:
+    path = f"/ws/channels/{room['channel']['id']}"
+    async with WsClient(db_app, path, _cookies(db_client)) as tab_1:
+        await tab_1.accepted()
+        first_id = (await tab_1.next_event("hello"))["data"]["connection_id"]
+        async with WsClient(db_app, path, _cookies(db_client)) as tab_2:
+            await tab_2.accepted()
+            second_id = (await tab_2.next_event("hello"))["data"]["connection_id"]
+            told = await tab_2.next_event("playback.claimed")
+
+            assert told["data"]["connection_id"] == first_id != second_id
+
+
+async def test_claim_if_free_takes_over_only_when_nobody_plays(
+    db_app: FastAPI, db_client: AsyncClient, room: dict[str, Any]
+) -> None:
+    path = f"/ws/channels/{room['channel']['id']}"
+    async with WsClient(db_app, path, _cookies(db_client)) as tab_1:
+        await tab_1.accepted()
+        first_id = (await tab_1.next_event("hello"))["data"]["connection_id"]
+        async with WsClient(db_app, path, _cookies(db_client)) as tab_2:
+            await tab_2.accepted()
+            second_id = (await tab_2.next_event("hello"))["data"]["connection_id"]
+            await tab_2.send_json({"type": "playback.claim_if_free"})  # tab 1 still plays
+            await tab_2.send_json({"type": "ping"})
+            await tab_2.next_event("pong")
+            assert (
+                await PlayerRegistry(db_app.state.redis).active(
+                    uuid.UUID(room["channel"]["id"]), uuid.UUID(room["alice"]["id"])
+                )
+                == first_id
+            )
+
+        # Tab 2 played nothing and left; now tab 1 leaves and a new tab asks.
+    async with WsClient(db_app, path, _cookies(db_client)) as tab_3:
+        await tab_3.accepted()
+        third_id = (await tab_3.next_event("hello"))["data"]["connection_id"]
+        told = await tab_3.next_event("playback.claimed")
+
+        assert told["data"]["connection_id"] == third_id  # free again: the new tab plays
+    assert second_id not in (first_id, third_id)
 
 
 async def test_one_receipt_event_can_cover_many_messages(

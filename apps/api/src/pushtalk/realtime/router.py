@@ -87,6 +87,12 @@ async def channel_socket(
                 )
             )
         await players.claim_if_free(channel_id, user_id, connection.id)
+        # Tell this connection who plays, even when it is another one: otherwise a tab that
+        # joins while another tab plays would never learn that it must stay silent.
+        player = await players.active(channel_id, user_id)
+        await connection.send(
+            event("playback.claimed", channel_id=str(channel_id), connection_id=player)
+        )
 
         while True:
             async with asyncio.timeout(IDLE_TIMEOUT_S):
@@ -109,6 +115,9 @@ async def channel_socket(
                     await _record_receipt(state, bus, user_id, channel_id, message.get("data"))
                 case "playback.claim":
                     await players.claim(channel_id, user_id, connection.id)
+                case "playback.claim_if_free":
+                    # Nobody plays any more and no tab of the user has focus: the first asks wins.
+                    await players.claim_if_free(channel_id, user_id, connection.id)
                 case _:
                     await connection.send(
                         event("error", code="unknown_event", message="Unknown event type.")

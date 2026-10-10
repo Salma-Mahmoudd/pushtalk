@@ -8,6 +8,9 @@ import { type SocketEvent, type SocketState, socketUrl, WsClient } from '@/share
 import { fromServer, lastSeq, type MessageOut, type ReceiptSummary, type Transcript, useMessageStore } from './message-store'
 import { channelKeys } from './queries'
 
+/** How long an unfocused tab waits before asking to play when nobody does. */
+const CLAIM_IF_FREE_DELAY_MS = 1000
+
 type MessagePage = components['schemas']['MessagePage']
 
 export interface IncomingOptions {
@@ -138,8 +141,12 @@ export function useChannelSocket(channelId: string, enabled: boolean, handlers: 
         case 'playback.claimed': {
           const claimed = data as { channel_id: string; connection_id: string | null }
           if (claimed.channel_id !== channelId) break
-          // Nobody plays (the playing tab closed): the focused tab takes over.
-          if (claimed.connection_id === null && document.hasFocus()) claim()
+          // Nobody plays (the playing tab closed): the focused tab takes over at once; otherwise
+          // every other tab asks a moment later and the server lets only the first one play.
+          if (claimed.connection_id === null) {
+            if (document.hasFocus()) claim()
+            else window.setTimeout(() => socket.send({ type: 'playback.claim_if_free' }), CLAIM_IF_FREE_DELAY_MS)
+          }
           handlersRef.current.onPlaybackActive(claimed.connection_id !== null && claimed.connection_id === connectionId)
           break
         }
@@ -155,6 +162,9 @@ export function useChannelSocket(channelId: string, enabled: boolean, handlers: 
       refreshSession: refreshOnce,
       onStateChange: (next) => {
         setState(next)
+        // A disconnected tab may already have lost playback to another one: it stays silent
+        // until the server says who plays (on reconnect), so audio never plays twice.
+        if (next === 'reconnecting') handlersRef.current.onPlaybackActive(false)
         if (next !== 'open') return
         opens += 1
         // Anything may have changed while disconnected; a focused tab is the one listening.

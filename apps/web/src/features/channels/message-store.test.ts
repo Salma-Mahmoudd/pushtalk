@@ -16,6 +16,7 @@ function message(overrides: Partial<ChatMessage>): ChatMessage {
     waveform: null,
     failureReason: null,
     createdAt: '2026-01-01T00:00:00Z',
+    receipts: null,
     ...overrides,
   }
 }

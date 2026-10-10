@@ -3,7 +3,7 @@ import { createBrowserRouter, Navigate } from 'react-router'
 import { AuthPage } from '@/features/auth/components/auth-page'
 import { GuestOnly, RequireAuth } from '@/features/auth/components/guards'
 import { BrowsePage } from '@/features/channels/components/browse-page'
-import { ChannelRoom } from '@/features/channels/components/channel-room'
+import { ChannelRoomPage } from '@/features/channels/components/channel-room'
 
 import { AppShell } from './app-shell'
 
@@ -22,7 +22,7 @@ export const router = createBrowserRouter([
         element: <AppShell />,
         children: [
           { path: '/channels', element: <BrowsePage /> },
-          { path: '/channels/:channelId', element: <ChannelRoom /> },
+          { path: '/channels/:channelId', element: <ChannelRoomPage /> },
         ],
       },
     ],

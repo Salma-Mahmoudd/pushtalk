@@ -13,7 +13,8 @@ export const CLOSE_UNAUTHORIZED = 4401
 export const CLOSE_FORBIDDEN = 4403
 
 export interface WsClientOptions {
-  url: string
+  /** Called on every (re)connect, so the address can carry fresh state (e.g. since_seq). */
+  url: () => string
   onEvent: (event: SocketEvent) => void
   onStateChange?: (state: SocketState) => void
   /** Renews the session after a 4401 close; resolves false when the session is over. */
@@ -22,7 +23,7 @@ export interface WsClientOptions {
   pingIntervalMs?: number
   /** Injectable for tests. */
   createSocket?: (url: string) => WebSocket
-  /** Where the browser's "online" event fires; defaults to window. */
+  /** Where the browser's "online" and "offline" events fire; defaults to window. */
   onlineEvents?: EventTarget
   random?: () => number
 }
@@ -36,6 +37,7 @@ export function socketUrl(path: string): string {
 /**
  * One logical connection that survives drops: reconnects with exponential backoff (at once
  * when the browser comes back online), refreshes the session once on 4401 and stops on 4403.
+ * Going offline drops the socket right away instead of waiting for a dead TCP connection to time out.
  */
 export class WsClient {
   private readonly options: WsClientOptions
@@ -54,6 +56,7 @@ export class WsClient {
   connect(): void {
     this.stopped = false
     this.onlineEvents()?.addEventListener('online', this.onOnline)
+    this.onlineEvents()?.addEventListener('offline', this.onOffline)
     this.open('connecting')
   }
 
@@ -73,7 +76,7 @@ export class WsClient {
   private open(state: SocketState): void {
     clearTimeout(this.reconnectTimer)
     this.setState(state)
-    const socket = (this.options.createSocket ?? ((url) => new WebSocket(url)))(this.options.url)
+    const socket = (this.options.createSocket ?? ((url) => new WebSocket(url)))(this.options.url())
     this.socket = socket
     socket.onopen = () => {
       this.attempt = 0
@@ -136,11 +139,21 @@ export class WsClient {
     if (this.state === 'reconnecting' && this.socket === null) this.open('reconnecting')
   }
 
+  private readonly onOffline = () => {
+    const socket = this.socket
+    if (!socket) return
+    this.socket = null
+    clearInterval(this.pingTimer)
+    socket.close(1000)
+    this.scheduleReconnect()
+  }
+
   private stop(): void {
     this.stopped = true
     clearTimeout(this.reconnectTimer)
     clearInterval(this.pingTimer)
     this.onlineEvents()?.removeEventListener('online', this.onOnline)
+    this.onlineEvents()?.removeEventListener('offline', this.onOffline)
     this.setState('closed')
   }
 

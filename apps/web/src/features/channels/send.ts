@@ -38,6 +38,7 @@ export async function sendRecording(
     waveform: null,
     failureReason: null,
     createdAt: retryOf?.createdAt ?? new Date().toISOString(),
+    receipts: null,
     upload: blob,
   })
 

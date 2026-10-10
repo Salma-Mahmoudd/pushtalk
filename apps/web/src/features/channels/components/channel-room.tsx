@@ -1,21 +1,22 @@
 import { HashIcon, LockIcon, MicIcon } from 'lucide-react'
-import { useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useParams } from 'react-router'
 
 import { useAuthStore } from '@/features/auth/store'
+import { AudioUnlockBanner, PlayHereBanner } from '@/features/voice/components/playback-banners'
 import { PttButton } from '@/features/voice/components/ptt-button'
-import { stopPlayback } from '@/features/voice/manual-player'
-
+import type { QueueItem } from '@/features/voice/playback-queue'
+import { usePlayback } from '@/features/voice/use-playback'
 import { ApiError } from '@/shared/lib/api/client'
 import { Button } from '@/shared/ui/button'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/shared/ui/empty'
 import { Spinner } from '@/shared/ui/spinner'
 
-import { orderMessages, useMessageStore } from '../message-store'
+import { type ChatMessage, type MessageOut, orderMessages, useMessageStore } from '../message-store'
 import { useChannel, useJoinChannel, useMembers } from '../queries'
 import { sendRecording } from '../send'
 import { useChannelHistory } from '../use-channel-history'
-import { useChannelSocket } from '../use-channel-socket'
+import { type IncomingOptions, useChannelSocket } from '../use-channel-socket'
 import { ConnectionStatus } from './connection-status'
 import { MemberList } from './member-list'
 import { MessageList } from './message-list'
@@ -41,14 +42,46 @@ function JoinPrompt({ channelId }: { channelId: string }) {
   )
 }
 
-export function ChannelRoom() {
+const audioSrc = (messageId: string) => `/api/messages/${messageId}/audio`
+
+/** The page for /channels/:channelId; remounts per channel, so each room has its own queue. */
+export function ChannelRoomPage() {
   const { channelId = '' } = useParams()
+  return <ChannelRoom key={channelId} channelId={channelId} />
+}
+
+function ChannelRoom({ channelId }: { channelId: string }) {
   const channel = useChannel(channelId)
   const isMember = channel.isSuccess
   const members = useMembers(channelId, isMember)
-  const socket = useChannelSocket(channelId, isMember)
-  useChannelHistory(channelId, socket.state, isMember)
   const user = useAuthStore((state) => state.user)
+  const userId = user?.id
+
+  const sendRef = useRef<(event: { type: string; data?: Record<string, unknown> }) => boolean>(() => false)
+  const report = useCallback((messageId: string, status: 'delivered' | 'played') => {
+    sendRef.current({ type: 'receipt', data: { message_id: messageId, status } })
+  }, [])
+
+  const { queue, snapshot } = usePlayback(useCallback((item: QueueItem) => report(item.id, 'played'), [report]))
+
+  const onIncoming = useCallback(
+    (messages: MessageOut[], { autoplay }: IncomingOptions) => {
+      for (const message of messages) {
+        if (message.sender.id === userId || message.seq === null) continue
+        report(message.id, 'delivered')
+        if (autoplay) queue.enqueue({ id: message.id, seq: message.seq, src: audioSrc(message.id), own: false })
+      }
+    },
+    [queue, report, userId],
+  )
+  const onPlaybackActive = useCallback((active: boolean) => queue.setActive(active), [queue])
+  const handlers = useMemo(() => ({ onIncoming, onPlaybackActive }), [onIncoming, onPlaybackActive])
+
+  const socket = useChannelSocket(channelId, isMember, handlers)
+  useEffect(() => {
+    sendRef.current = socket.send
+  }, [socket.send])
+  const history = useChannelHistory(channelId, isMember)
   const stored = useMessageStore((state) => state.byChannel[channelId])
   const messages = useMemo(() => orderMessages(stored), [stored])
 
@@ -74,6 +107,10 @@ export function ChannelRoom() {
   }
 
   const onlineCount = members.data?.filter((member) => socket.online.has(member.id)).length ?? 0
+  const play = (message: ChatMessage) =>
+    message.id &&
+    message.seq !== null &&
+    queue.playNow({ id: message.id, seq: message.seq, src: audioSrc(message.id), own: message.sender.id === userId })
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -85,11 +122,26 @@ export function ChannelRoom() {
             <ConnectionStatus state={socket.state} />
           </span>
         </header>
+        <AudioUnlockBanner snapshot={snapshot} />
+        <PlayHereBanner snapshot={snapshot} onPlayHere={socket.claimPlayback} />
         {messages.length > 0 ? (
           <MessageList
             messages={messages}
-            currentUserId={user?.id}
+            currentUserId={userId}
+            playingId={snapshot.currentId}
+            onPlay={play}
+            onStop={() => queue.stopCurrent()}
             onRetry={(message) => message.upload && user && void sendRecording(channelId, message.upload, user, message)}
+            header={
+              history.hasOlder && (
+                <div className="mb-3 flex justify-center">
+                  <Button variant="ghost" size="sm" disabled={history.loadingOlder} onClick={history.loadOlder}>
+                    {history.loadingOlder && <Spinner />}
+                    Load older messages
+                  </Button>
+                </div>
+              )
+            }
           />
         ) : (
           <Empty className="flex-1">
@@ -104,14 +156,12 @@ export function ChannelRoom() {
         )}
         <PttButton
           disabled={!user}
-          onRecordingChange={(recording) => recording && stopPlayback()}
+          onRecordingChange={(recording) => (recording ? queue.recordingStarted() : queue.recordingStopped())}
           onRecorded={(recording) => user && void sendRecording(channelId, recording.blob, user)}
         />
       </section>
       <aside className="hidden w-60 shrink-0 border-s p-3 lg:block" aria-label="Channel members">
-        <h2 className="mb-2 px-2 text-xs font-medium text-muted-foreground">
-          Members · {onlineCount} online
-        </h2>
+        <h2 className="mb-2 px-2 text-xs font-medium text-muted-foreground">Members · {onlineCount} online</h2>
         {members.data && <MemberList members={members.data} online={socket.online} />}
       </aside>
     </div>

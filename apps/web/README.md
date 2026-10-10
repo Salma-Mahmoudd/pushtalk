@@ -41,13 +41,16 @@ src/
   features/
     auth/             API calls, session store, refresh + tab sync, log-in/sign-up pages, route guards
     channels/         Sidebar, browse/join, create dialog, channel room with live member presence,
-                      message store (keyed by client id, status only moves forward), sending, message list
-    voice/            Recorder (MediaRecorder), push-to-talk button (pointer or Space, 0.5–60 s)
+                      message store (keyed by client id, status only moves forward), sending, message list,
+                      history paging, catch-up after reconnects, receipts (sent → delivered → played)
+    voice/            Recorder (MediaRecorder), push-to-talk button (pointer or Space, 0.5–60 s),
+                      playback queue (autoplay in order) and its audio element player
   shared/
     lib/api/          API client (cookies, error envelope → ApiError, one refresh for concurrent 401s)
                       and schema.d.ts, generated from the API (never edited by hand)
     lib/ws/           WsClient: reconnect with backoff (0.5 s doubling to 30 s, ±20 %), at once when
-                      back online; refresh once on 4401, stop on 4403; ping every 25 s
+                      back online, drop the socket when the browser goes offline; refresh once on 4401,
+                      stop on 4403; ping every 25 s
     hooks/            Shared hooks (useIsMobile)
     ui/               shadcn/ui components
     theme/            Light/dark/system provider and toggle
@@ -63,6 +66,18 @@ Tokens live in httpOnly cookies and are never readable by JavaScript; the app on
 ### Server data
 
 TanStack Query holds data from the API (channels, members); creating or joining a channel refreshes it, and a room refreshes its member list on `member.joined` events and after every reconnect. The cache is cleared when the session ends. Live state that only arrives over the WebSocket (who is online) stays in the room's hook.
+
+### Playback
+
+`features/voice/playback-queue.ts` decides what plays, without touching the DOM (unit-tested); `html-audio-player.ts` plays one `<audio>` source at a time.
+
+- **Order:** incoming messages queue by channel sequence number and play one after another; a message that arrives late (catch-up, gap fill) slots into place. The same sequence number never queues twice, and the user's own messages never autoplay.
+- **What autoplays:** messages that arrive live, and messages caught up after a reconnect. Opening a room or reloading the page shows history without playing it.
+- **Browser autoplay rules:** audio starts only after the user has interacted with the page. Arriving through a click (for example on the channel link) counts; otherwise a banner shows how many messages are waiting, and the first tap or key press anywhere starts them.
+- **While recording:** playback pauses when push-to-talk starts and resumes after release.
+- **Manual play:** the play button on any message interrupts the queue; the queue continues afterwards.
+- **One playing tab per user:** each socket can claim playback (`playback.claim`). The focused tab claims on open and on focus; other tabs and devices of the same user show "Playing in another tab or device" with a "Play here" button.
+- **Receipts:** the room reports `delivered` when a message arrives and `played` when it plays to the end. Senders see "Delivered n/m" or "Played n/m" under their messages, live, and a click opens the per-person times.
 
 ## Configuration
 

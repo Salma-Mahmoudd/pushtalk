@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import type { components } from '@/shared/lib/api/schema'
 
 export type MessageOut = components['schemas']['MessageOut']
+export type ReceiptSummary = components['schemas']['ReceiptSummary']
 
 /** uploading: not on the server yet; processing/ready/failed: the server's status. */
 export type MessageStatus = 'uploading' | 'processing' | 'ready' | 'failed'
@@ -19,6 +20,8 @@ export interface ChatMessage {
   waveform: number[] | null
   failureReason: string | null
   createdAt: string
+  /** Delivered/played counts, on the user's own ready messages. */
+  receipts: ReceiptSummary | null
   /** Kept until the server has the recording, so a failed upload can be retried. */
   upload?: Blob
 }
@@ -38,6 +41,7 @@ export function fromServer(message: MessageOut): ChatMessage {
     waveform: message.waveform,
     failureReason: message.failure_reason,
     createdAt: message.created_at,
+    receipts: message.receipts ?? null,
   }
 }
 
@@ -50,6 +54,7 @@ interface MessageState {
   /** Merges server copies; never moves a message back to an earlier status. */
   upsert: (messages: ChatMessage[]) => void
   markFailed: (channelId: string, clientMsgId: string, reason: string) => void
+  setReceipts: (channelId: string, messageId: string, receipts: ReceiptSummary) => void
   remove: (channelId: string, clientMsgId: string) => void
 }
 
@@ -69,8 +74,13 @@ export const useMessageStore = create<MessageState>()((set) => ({
         const channel = { ...byChannel[incoming.channelId] }
         const existing = channel[incoming.clientMsgId]
         if (existing && RANK[incoming.status] < RANK[existing.status]) continue
-        // The server now has the recording; the local copy is no longer needed.
-        channel[incoming.clientMsgId] = { ...incoming, upload: incoming.id ? undefined : existing?.upload }
+        // The server now has the recording; the local copy is no longer needed. Live receipt
+        // counts are newer than the ones a message event carries.
+        channel[incoming.clientMsgId] = {
+          ...incoming,
+          receipts: existing?.receipts ?? incoming.receipts,
+          upload: incoming.id ? undefined : existing?.upload,
+        }
         byChannel[incoming.channelId] = channel
       }
       return { byChannel }
@@ -84,6 +94,15 @@ export const useMessageStore = create<MessageState>()((set) => ({
           ...state.byChannel,
           [channelId]: { ...state.byChannel[channelId], [clientMsgId]: { ...existing, status: 'failed', failureReason: reason } },
         },
+      }
+    }),
+  setReceipts: (channelId, messageId, receipts) =>
+    set((state) => {
+      const channel = state.byChannel[channelId]
+      const message = Object.values(channel ?? {}).find((candidate) => candidate.id === messageId)
+      if (!channel || !message) return state
+      return {
+        byChannel: { ...state.byChannel, [channelId]: { ...channel, [message.clientMsgId]: { ...message, receipts } } },
       }
     }),
   remove: (channelId, clientMsgId) =>
@@ -100,4 +119,20 @@ export function orderMessages(messages: ChannelMessages | undefined): ChatMessag
   const ready = all.filter((message) => message.status === 'ready').sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
   const pending = all.filter((message) => message.status !== 'ready').sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   return [...ready, ...pending]
+}
+
+/** Highest seq the browser has for a channel, or null before any ready message. */
+export function lastSeq(channelId: string): number | null {
+  const seqs = Object.values(useMessageStore.getState().byChannel[channelId] ?? {})
+    .filter((message) => message.status === 'ready' && message.seq !== null)
+    .map((message) => message.seq as number)
+  return seqs.length ? Math.max(...seqs) : null
+}
+
+/** Lowest seq loaded, for paging back through history. */
+export function firstSeq(channelId: string): number | null {
+  const seqs = Object.values(useMessageStore.getState().byChannel[channelId] ?? {})
+    .filter((message) => message.seq !== null)
+    .map((message) => message.seq as number)
+  return seqs.length ? Math.min(...seqs) : null
 }

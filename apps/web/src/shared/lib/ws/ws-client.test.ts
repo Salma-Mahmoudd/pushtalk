@@ -44,7 +44,7 @@ describe('WsClient', () => {
 
   function connect(): WsClient {
     const client = new WsClient({
-      url: 'ws://test/ws/channels/1',
+      url: () => 'ws://test/ws/channels/1',
       onEvent,
       onStateChange: (state) => states.push(state),
       refreshSession,
@@ -115,6 +115,21 @@ describe('WsClient', () => {
 
     network.dispatchEvent(new Event('online'))
 
+    expect(sockets).toHaveLength(2)
+  })
+
+  it('drops the socket when the browser goes offline and reopens when it is back', () => {
+    connect()
+    latest().serverOpens()
+
+    network.dispatchEvent(new Event('offline'))
+    expect(sockets[0].readyState).toBe(3)
+    expect(states.at(-1)).toBe('reconnecting')
+
+    latest().serverCloses(1000) // the late close event of the dropped socket is ignored
+    expect(sockets).toHaveLength(1)
+
+    network.dispatchEvent(new Event('online'))
     expect(sockets).toHaveLength(2)
   })
 

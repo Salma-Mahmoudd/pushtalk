@@ -1,12 +1,12 @@
 import { cn } from 'cn'
-import { AlertCircleIcon, PauseIcon, PlayIcon, RotateCwIcon } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { AlertCircleIcon, PlayIcon, RotateCwIcon, SquareIcon } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 
-import { playExclusive, stopPlayback } from '@/features/voice/manual-player'
 import { Button } from '@/shared/ui/button'
 import { Spinner } from '@/shared/ui/spinner'
 
 import type { ChatMessage } from '../message-store'
+import { ReceiptDetails } from './receipt-details'
 
 function duration(ms: number | null): string {
   if (ms === null) return '–:––'
@@ -29,6 +29,26 @@ function Waveform({ peaks, own }: { peaks: number[] | null; own: boolean }) {
   )
 }
 
+function ReadyStatus({ message }: { message: ChatMessage }) {
+  const receipts = message.receipts
+  let label = 'Sent'
+  if (receipts && receipts.total > 0) {
+    if (receipts.played > 0) label = `Played ${receipts.played}/${receipts.total}`
+    else if (receipts.delivered > 0) label = `Delivered ${receipts.delivered}/${receipts.total}`
+  }
+  if (!message.id) return <span>{label}</span>
+  return (
+    <ReceiptDetails
+      messageId={message.id}
+      trigger={
+        <button type="button" className="underline-offset-2 hover:underline">
+          {label}
+        </button>
+      }
+    />
+  )
+}
+
 function Status({ message, onRetry }: { message: ChatMessage; onRetry: () => void }) {
   switch (message.status) {
     case 'uploading':
@@ -46,50 +66,50 @@ function Status({ message, onRetry }: { message: ChatMessage; onRetry: () => voi
     case 'failed':
       return (
         <span className="flex items-center gap-1 text-destructive" role="alert">
-          <AlertCircleIcon className="size-3" /> {message.failureReason === 'invalid_audio' ? 'The recording could not be processed.' : (message.failureReason ?? 'Failed')}
+          <AlertCircleIcon className="size-3" />
+          {message.failureReason === 'invalid_audio' ? 'The recording could not be processed.' : (message.failureReason ?? 'Failed')}
           <Button variant="link" size="xs" className="h-auto p-0 text-destructive" onClick={onRetry} disabled={!message.upload}>
             <RotateCwIcon className="size-3" /> Retry
           </Button>
         </span>
       )
     case 'ready':
-      return <span>Sent</span>
+      return <ReadyStatus message={message} />
   }
 }
 
-function MessageBubble({ message, own, onRetry }: { message: ChatMessage; own: boolean; onRetry: () => void }) {
-  const [playing, setPlaying] = useState(false)
+interface BubbleProps {
+  message: ChatMessage
+  own: boolean
+  playing: boolean
+  onPlay: () => void
+  onStop: () => void
+  onRetry: () => void
+}
+
+function MessageBubble({ message, own, playing, onPlay, onStop, onRetry }: BubbleProps) {
   const playable = message.status === 'ready' && message.id !== null
-
-  function toggle() {
-    if (playing) {
-      stopPlayback()
-      setPlaying(false)
-      return
-    }
-    setPlaying(true)
-    playExclusive(`/api/messages/${message.id}/audio`, () => setPlaying(false))
-  }
-
   return (
     <li className={cn('flex flex-col gap-1', own ? 'items-end' : 'items-start')}>
       {!own && <span className="px-3 text-xs font-medium text-muted-foreground">{message.sender.username}</span>}
       <div
         className={cn(
-          'flex w-64 max-w-full items-center gap-2 rounded-3xl px-2 py-2 sm:w-72',
+          'flex w-64 max-w-full items-center gap-2 rounded-3xl px-2 py-2 transition-shadow sm:w-72',
           own ? 'bg-primary text-primary-foreground' : 'bg-muted',
+          playing && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
           message.status === 'failed' && 'opacity-70',
         )}
+        aria-current={playing ? 'true' : undefined}
       >
         <Button
           size="icon-sm"
           variant={own ? 'secondary' : 'default'}
           className="shrink-0 rounded-full"
           disabled={!playable}
-          aria-label={playing ? 'Pause' : 'Play'}
-          onClick={toggle}
+          aria-label={playing ? 'Stop' : 'Play'}
+          onClick={playing ? onStop : onPlay}
         >
-          {playing ? <PauseIcon /> : <PlayIcon />}
+          {playing ? <SquareIcon /> : <PlayIcon />}
         </Button>
         <Waveform peaks={message.waveform} own={own} />
         <span className="w-9 shrink-0 text-end text-xs tabular-nums">{duration(message.durationMs)}</span>
@@ -103,33 +123,43 @@ function MessageBubble({ message, own, onRetry }: { message: ChatMessage; own: b
   )
 }
 
-export function MessageList({
-  messages,
-  currentUserId,
-  onRetry,
-}: {
+interface MessageListProps {
   messages: ChatMessage[]
   currentUserId: string | undefined
+  playingId: string | null
+  onPlay: (message: ChatMessage) => void
+  onStop: () => void
   onRetry: (message: ChatMessage) => void
-}) {
-  const bottom = useRef<HTMLDivElement>(null)
+  header?: React.ReactNode
+}
 
+export function MessageList({ messages, currentUserId, playingId, onPlay, onStop, onRetry, header }: MessageListProps) {
+  const bottom = useRef<HTMLDivElement>(null)
+  const newest = messages.at(-1)?.clientMsgId
+
+  // Follow new messages at the bottom; loading older pages keeps the position.
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages.length])
+  }, [newest])
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-      <ol className="mx-auto flex max-w-2xl flex-col gap-3" aria-label="Messages">
-        {messages.map((message) => (
-          <MessageBubble
-            key={message.clientMsgId}
-            message={message}
-            own={message.sender.id === currentUserId}
-            onRetry={() => onRetry(message)}
-          />
-        ))}
-      </ol>
+      <div className="mx-auto max-w-2xl">
+        {header}
+        <ol className="flex flex-col gap-3" aria-label="Messages">
+          {messages.map((message) => (
+            <MessageBubble
+              key={message.clientMsgId}
+              message={message}
+              own={message.sender.id === currentUserId}
+              playing={message.id !== null && message.id === playingId}
+              onPlay={() => onPlay(message)}
+              onStop={onStop}
+              onRetry={() => onRetry(message)}
+            />
+          ))}
+        </ol>
+      </div>
       <div ref={bottom} />
     </div>
   )

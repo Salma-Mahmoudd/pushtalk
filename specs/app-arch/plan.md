@@ -28,7 +28,7 @@ A polyglot monorepo (`apps/api` Python/FastAPI, `apps/web` React/TS) that runs e
 | Auth | JWT access token (15 min) + opaque rotating refresh token (7 days), both in httpOnly `SameSite=Strict` cookies; Origin check on unsafe requests | No token readable by scripts; WebSocket and `<audio src>` authenticate with the cookie |
 | Job queue | **Celery** (Redis broker), queues `audio` and `transcribe`, **Flower** dashboard | Industry standard, rich retries and routing; tasks call the shared async code through `asyncio.run()` |
 | Pub/sub | Redis pub/sub, topics `ch:{channel_id}` and `user:{user_id}` | Fan-out across multiple API replicas |
-| Media | **MinIO** (S3 API) | Same code works with real S3 later |
+| Media | **Local Docker volume** behind `FileStorage` (MinIO planned; its images are no longer published) | An S3 implementation of the same interface is a contained change |
 | Frontend | React + TS + Vite, Tailwind + shadcn/ui, Zustand (client state), TanStack Query (REST cache) | Small, explicit state boundaries; accessible UI primitives |
 | Frontend layout | `src/features/{auth,channels,voice,dms}` + `src/shared/{ui,lib}` | Feature boundaries match the backend |
 | Edge | nginx in the `web` image | Serves the SPA and proxies `/api` and `/ws`: one origin, no CORS, cookies work everywhere |
@@ -50,7 +50,7 @@ A polyglot monorepo (`apps/api` Python/FastAPI, `apps/web` React/TS) that runs e
 
 | Group | Keys |
 | --- | --- |
-| Infrastructure | `DATABASE_URL`, `REDIS_URL`, `CELERY_BROKER_URL`, `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET` |
+| Infrastructure | `DATABASE_URL`, `REDIS_URL`, `CELERY_BROKER_URL`, `MEDIA_DIR` |
 | Auth | `JWT_SECRET`, `ACCESS_TOKEN_TTL_MIN`, `REFRESH_TOKEN_TTL_DAYS`, `REFRESH_REUSE_GRACE_S`, `COOKIE_SECURE`, `ALLOWED_ORIGINS` |
 | Audio | `MAX_UPLOAD_BYTES`, `MIN_DURATION_MS`, `MAX_DURATION_MS` |
 | Rate limits | `RATE_LIMIT_*` (one per rule) |
@@ -72,7 +72,7 @@ Generators create the standard files; the structure that is specific to this pro
 | # | Task | Done when |
 | --- | --- | --- |
 | 0.1 | `.env.example`, root `Makefile` (`up`, `dev`, `down`, `reset`, `logs`, `test`, `lint`, `types`, `diagrams`), README stub | `make help` lists targets |
-| 0.2 | `apps/api`: `uv init --package --name pushtalk`, `uv add` runtime and dev dependencies, FastAPI app factory, `/api/health` (gains one check per dependency as it is added: database and Redis in Phase 0, MinIO and `ffmpeg -version` in Phase 3) | `uv run uvicorn pushtalk.main:app` serves health |
+| 0.2 | `apps/api`: `uv init --package --name pushtalk`, `uv add` runtime and dev dependencies, FastAPI app factory, `/api/health` (gains one check per dependency as it is added: database and Redis) | `uv run uvicorn pushtalk.main:app` serves health |
 | 0.3 | Settings, structlog JSON logging, request-id middleware, error envelope + handlers, `OriginCheckMiddleware` | bad JSON → envelope 422; foreign Origin → 403 |
 | 0.3b | `docker-compose.yml` with postgres + redis (health checks, volumes, Redis append-only file); `docker-compose.dev.yml` publishes them on `127.0.0.1:5433` and `127.0.0.1:6380` | both services `healthy`, reachable from the host |
 | 0.3c | ruff + **mypy --strict** on `src/`, `tsc --noEmit` strict + eslint on web; `make lint` runs all of them | clean from the first commit |
@@ -81,8 +81,8 @@ Generators create the standard files; the structure that is specific to this pro
 | 0.6 | `Dockerfile` for api (python:3.12-slim + uv, non-root, no dev tools); one image for `api` and the `migrate` job. ffmpeg is added in Phase 3, the `transcriber` target in Phase 5 | image builds |
 | 0.7 | `apps/web`: `pnpm create vite --template react-ts`, Tailwind + `shadcn init`, Zustand, TanStack Query, vitest, `ApiClient`, router shell, feature folders | `pnpm dev` shows page |
 | 0.8 | web `Dockerfile` (node build → nginx) + `nginx.conf` with WS upgrade | `/api/health` works via :8080 |
-| 0.9 | `docker-compose.yml`: postgres, redis, migrate, api, web, with healthchecks and start order. worker + flower join in Phase 3, minio + minio-init in Phase 3, transcriber in Phase 5 | **fresh clone → `docker compose up` → app on :8080** |
-| 0.10 | `docker-compose.dev.yml`: PostgreSQL/Redis on `127.0.0.1:5433`/`6380`, API with `uvicorn --reload` on `127.0.0.1:8001`; `pnpm dev` (:5173) proxies `/api` to it. Celery reload (`watchfiles`) and the minio console join in Phase 3; `make dev` | edit a file → reload |
+| 0.9 | `docker-compose.yml`: postgres, redis, migrate, api, web, with healthchecks and start order. worker + flower and the `media` volume join in Phase 3, transcriber in Phase 5 | **fresh clone → `docker compose up` → app on :8080** |
+| 0.10 | `docker-compose.dev.yml`: PostgreSQL/Redis on `127.0.0.1:5433`/`6380`, API with `uvicorn --reload` on `127.0.0.1:8001`; `pnpm dev` (:5173) proxies `/api` to it. Celery reload (`watchfiles`) joins in Phase 3; `make dev` | edit a file → reload |
 
 ### Phase 1–5
 
@@ -90,7 +90,7 @@ Feature work lives in [`../auth/plan.md`](../auth/plan.md) and [`../chat/plan.md
 
 - P1: `get_current_user` (cookie) becomes the standard auth guard; refresh rotation and logout publish `session.revoked`; the shared `RateLimiter` arrives with its first user, the login and signup limits.
 - P2: `EventBus` (Redis pub/sub) + `ConnectionManager` + `PresenceService`.
-- P3: `minio` + `minio-init` compose services; `ObjectStorage` + `ffmpeg` infra modules and their health checks; Celery app (Redis broker, queues `audio` + `transcribe`, `acks_late`, `reject_on_worker_lost`, prefetch 1) with `process_message` and retries; `worker` + `flower` compose services; ffmpeg in the API image.
+- P3: `media` volume; `FileStorage` + `audio` (ffprobe/ffmpeg) infra modules; Celery app (Redis broker, queues `audio` + `transcribe`, `acks_late`, `reject_on_worker_lost`, prefetch 1) with `process_message` and retries; `worker` + `flower` compose services; ffmpeg in the API image.
 - P4: nginx `proxy_read_timeout 3600s` for WS; app-level ping every 25 s.
 - P5: `transcriber` Dockerfile target with the `base` model downloaded at build time and a `whisper-models` volume for other sizes; provider factory; `/ws/me` user socket; rate-limit rules in env.
 
@@ -106,7 +106,7 @@ Feature work lives in [`../auth/plan.md`](../auth/plan.md) and [`../chat/plan.md
 
 ## Testing infrastructure
 
-- **api**: pytest + pytest-asyncio. A separate test database (`pushtalk_test`) is migrated once per session, and each test runs in a transaction that is rolled back. Redis uses `fakeredis`; MinIO uses an in-memory `ObjectStorage` fake behind the same interface. Celery tasks are called directly as functions (no broker needed).
+- **api**: pytest + pytest-asyncio. A separate test database (`pushtalk_test`) is migrated once per session, and each test runs in a transaction that is rolled back. Redis uses `fakeredis`; `FileStorage` writes to a temporary folder; ffmpeg runs for real on generated recordings. Celery tasks are called directly as functions (no broker needed).
 - **web**: vitest with jsdom; `PlaybackQueue` tested with `FakeAudioPlayer` (no DOM audio).
 - `make test` runs both.
 

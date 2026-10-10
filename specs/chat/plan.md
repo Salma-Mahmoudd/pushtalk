@@ -21,7 +21,7 @@ The queue starts in `Locked`. Incoming messages are buffered and an "🔊 Tap to
 
 - Each tab has its own WS connection. Presence stores one heartbeat entry per connection (Redis ZSET, refreshed by every 25 s ping, expires after 60 s), so a user stays "online" until their last tab closes. Entries from a crashed API pod expire on their own.
 - Messages and receipts fan out to every connection of the user. Sender status updates appear in all of the sender's tabs.
-- **Who plays: channel-open + last-focused.** Only the user's connections open on that channel are candidates (the socket is per channel, so other channels never receive the audio). Among them, the most recently focused tab or device sends `playback.claim`; the server marks that connection `is_active_player` and sends `playback.released` to the user's other connections on the channel. "Last focused" instead of "currently focused" keeps playback working while the browser is in the background.
+- **Who plays: channel-open + last-focused.** Only the user's connections open on that channel are candidates (the socket is per channel, so other channels never receive the audio). The first connection claims automatically; afterwards the most recently focused tab or device sends `playback.claim`. The server records the player in Redis (`PlayerRegistry`) and sends `playback.claimed {connection_id}` to all of the user's connections on the channel; when the player closes, `connection_id: null` lets the focused tab take over. "Last focused" instead of "currently focused" keeps playback working while the browser is in the background.
 - Inactive connections still show messages and send `delivered`, stay silent, and show a "▶ play here" button that sends `playback.claim` from there. `played` is idempotent, so the first play wins.
 - Two *devices* follow the same rule, so audio never plays twice in the same room.
 
@@ -62,20 +62,22 @@ Envelope: `{ "type": "...", "data": {...} }`
 
 | Direction | type | data |
 | --- | --- | --- |
-| S→C | `catchup` | `{messages[], has_more}` |
+| S→C | `hello` | `{connection_id}`, first event on every connection |
+| S→C | `catchup` | `{messages[], has_more}`, only when the client sent `since_seq` |
 | S→C | `presence.snapshot` / `presence.update` | `{online_user_ids}` / `{user_id, online}` |
 | S→C | `message.processing` | sender's own connections only (other tabs see the "sending…" bubble) |
-| S→C | `message.ready` | `{id, seq, sender_id, duration_ms, waveform, created_at}` |
-| S→C | `message.failed` | `{id, reason}`, sender's connections only |
-| S→C | `receipt.updated` | `{message_id, delivered, played, total, recipient: {user_id, delivered_at, played_at}}`, sender only |
-| S→C | `message.transcribed` | `{id, status: "done"\|"failed", transcript?, lang?}` |
-| S→C | `playback.released` | another tab of the user took over playback |
-| S→C | `error` | error envelope |
+| S→C | `message.ready` | the full message: `{id, seq, sender, duration_ms, waveform, transcript_status, created_at, …}` |
+| S→C | `message.failed` | `{id, channel_id, client_msg_id, reason}`, sender's connections only |
+| S→C | `member.joined` | `{user_id, username}`; rooms refresh their member list |
+| S→C | `receipt.updated` | `{message_id, channel_id, delivered, played, total, recipient: {user_id, username, delivered_at, played_at}}`, sender only |
+| S→C | `message.transcribed` | `{id, channel_id, transcript_status: "done"\|"failed", transcript, transcript_lang}` |
+| S→C | `playback.claimed` | `{channel_id, connection_id}`: the connection that plays now (`null`: nobody) |
+| S→C | `error` | `{code, message}`, e.g. `rate_limited` (event dropped) or `unknown_event` |
 | C→S | `receipt` | `{message_id, status: "delivered"\|"played"}`, or `{message_ids: [...], status}` for up to 200 at once (a catch-up) |
 | C→S | `playback.claim` | — |
 | C→S | `ping` → S→C `pong` | keep-alive every 25 s |
 
-User-scoped socket **`/ws/me`** (open while logged in, same cookie auth and backoff client) carries `dm.created {channel}` so new DMs appear without a refresh.
+User-scoped socket **`/ws/me`** (open while logged in, same cookie auth and backoff client) carries `dm.created {channel_id}` so new DMs appear without a refresh, and keeps the app-wide presence behind the online dots of direct conversations. A client may send 30 events a second per connection.
 
 Close codes: `4401` missing, expired or revoked session → the client runs `refreshSession()` once and reconnects; if the refresh fails it goes to /login. `4403` not a member → the client does **not** reconnect. Anything else → reconnect with backoff.
 
@@ -137,7 +139,7 @@ Close codes: `4401` missing, expired or revoked session → the client runs `ref
 
 | # | Task | Acceptance |
 | --- | --- | --- |
-| 2.1 | Models + migration `0002_channels`: `channels` (incl. `kind`, `dm_key`, CHECK constraint so DMs need no later migration), `channel_members` | — |
+| 2.1 | Models + migration `0003_channels`: `channels` (incl. `kind`, `dm_key`, CHECK constraint so DMs need no later migration), `channel_members` | — |
 | 2.2 | `ChannelRepository`, `ChannelService` (create/join/list/require_member) | non-member → 403 `not_a_member` |
 | 2.3 | `routers/channels.py` | REST table above |
 | 2.4 | `EventBus` (Redis pub/sub) + `ConnectionManager` (one Redis subscription per channel per API process, local fan-out) | two api replicas both receive events |
@@ -149,10 +151,10 @@ Close codes: `4401` missing, expired or revoked session → the client runs `ref
 
 | # | Task | Acceptance |
 | --- | --- | --- |
-| 3.1 | Migration `0003_messages`: `messages` (+ enums, transcript columns, unique `(channel_id, seq)`, `(sender_id, client_msg_id)`), `message_receipts` | — |
-| 3.2 | `ObjectStorage` (MinIO) + in-memory fake for tests | — |
+| 3.1 | Migration `0004_messages`: `messages` (+ enum, unique `(channel_id, seq)`, `(sender_id, client_msg_id)`); `0005_receipts` adds `message_receipts` in Phase 4 and `0006_transcripts` the transcript columns in Phase 5 | — |
+| 3.2 | `FileStorage` on the `media` volume (MinIO images are no longer published; see DECISIONS.md 2.3); tests use a temporary folder | — |
 | 3.3 | `AudioValidator`: (a) `Content-Length` and streamed byte cap → 413; (b) **magic-byte sniff** (`1A45DFA3` webm/mkv, `OggS`, `ftyp` mp4, `RIFF…WAVE`) → 415, ignoring the client `Content-Type`; (c) **ffprobe real duration** into the 0.5–60 s range → 422 `invalid_audio` | client-sent duration is never read |
-| 3.4 | `MessageService.create_voice_message`: membership → validate → put original → insert `processing` (idempotent on `client_msg_id`) → `process_message.apply_async(queue="audio")` after commit → 202; publish `message.processing` to sender | double POST → same id |
+| 3.4 | `MessageService.create_voice_message`: membership → validate → put original → insert `processing` (idempotent on `client_msg_id`) → send `process_message` to queue `audio` after commit (broker down → `failed` + 503) → 202; publish `message.processing` to sender | double POST → same id |
 | 3.5 | Celery task `process_message` (queue `audio`): idempotency guard → download → `ffmpeg -ac 1 -ar 48000 -c:a libopus -b:a 32k out.ogg` → ffprobe duration → peaks (decode to s16le 8 kHz, 64 buckets of max abs, scaled 0–100) → upload → tx {next_seq, mark ready} → publish `message.ready` | message plays in another browser |
 | 3.6 | Failure handling: `InvalidMedia` → `failed` immediately; transient errors use Celery autoretry (`max_retries=3`, exponential backoff), and the last try → `failed`; `acks_late` redelivers the task if the worker dies. Publish `message.failed`. On success, delete the original (the processed file is the single source of truth). On failure, keep it under `originals/` for debugging | corrupt file → sender sees "failed" |
 | 3.7 | Audio endpoint: `require_member` → stream processed object with `Range` support (206), `Cache-Control: private, max-age=3600` | non-member → 404 |
@@ -166,11 +168,11 @@ Close codes: `4401` missing, expired or revoked session → the client runs `ref
 | 4.1 | WS catch-up on connect (`since_seq`, subscribe-before-query, LIMIT 200 + `has_more` → REST paging) | — |
 | 4.2 | `WsClient` reconnect: `delay = min(30 s, 500 ms·2^n) ± 20 %`, reset on open, immediate retry on `online` event, no retry on 4401/4403 | kill api container → app recovers and catches up |
 | 4.3 | `messageStore`: upsert by `seq`, de-dupe, gap detection → REST fill | — |
-| 4.4 | **`PlaybackQueue`** (pure TS, injected `AudioPlayer`): states Locked/Idle/Loading/Playing/Suspended; skip own messages; strict seq order; one at a time; prefetch next | unit-tested |
+| 4.4 | **`PlaybackQueue`** (pure TS, injected `AudioPlayer`): states Locked/Idle/Playing/Suspended/Inactive; skip own messages; strict seq order; one at a time; prefetch next | unit-tested |
 | 4.5 | `HtmlAudioPlayer`: `<audio src="/api/messages/{id}/audio">` authenticated by the cookie (streaming and seeking work natively); a second element preloads the next item; on error → `refreshSession()` and retry once, then skip | expired access token mid-queue → playback continues |
 | 4.6 | `AudioUnlockBanner` + global first-gesture unlock | fresh load + incoming msg → banner, tap → plays |
 | 4.7 | Receipts: `delivered` on `message.ready`/catch-up, `played` on `ended`; `ReceiptService` upsert + aggregate → `receipt.updated` to sender | sender sees "played 1/2" |
-| 4.8 | `playbackOwnership`: `playback.claim` on focus from tabs open on the channel; `playback.released` → silent + `PlayHereButton` | two tabs → audio once; "play here" moves playback |
+| 4.8 | Playback ownership: `playback.claim` on open and on focus from tabs open on the channel; `playback.claimed` naming another connection → silent + "Play here" banner | two tabs → audio once; "play here" moves playback |
 | 4.9 | `MessageBubble`: waveform bars, duration, status, n/m receipts; history scroll-back (`before_seq`) | — |
 | 4.10 | `ReceiptDetails` per-recipient view + `GET /api/messages/{id}/receipts`; `receipt.updated` carries the recipient row so the open panel updates live | sender sees who played it and when |
 
@@ -213,7 +215,7 @@ The brief calls these optional, but they're in scope for this project. Build the
 | 5D.2 | `DirectMessageService.open_dm`: `dm_key = "{min}:{max}"`, `INSERT … ON CONFLICT (dm_key) DO NOTHING`, then re-select (race-safe), insert both members | two users opening the same DM concurrently → one channel |
 | 5D.3 | `GET/POST /api/dms`; `join` returns 403 for `kind=direct`; `GET /api/channels` lists only `kind=group` | — |
 | 5D.4 | `/ws/me` user socket + `dm.created` event (published to `user:{id}`) | Bob sees Alice's new DM live |
-| 5D.5 | FE: `DirectList` in the sidebar under channels, `UserPicker` dialog; DM room reuses `ChannelRoom` (title = other user's name, presence = their dot) | voice, receipts, transcripts and speed all work in DMs |
+| 5D.5 | FE: `DirectList` in the sidebar under channels, `NewDirectDialog` (user search); DM room reuses `ChannelRoom` (title = other user's name, presence = their dot) | voice, receipts, transcripts and speed all work in DMs |
 
 ## Tests (targeting what's most likely to break)
 

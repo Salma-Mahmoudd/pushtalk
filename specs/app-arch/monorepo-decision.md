@@ -31,40 +31,41 @@ PushTalk has **two apps in two languages** and a short time box. The apps cannot
 ```text
 pushtalk/                            ← repository root
 ├── apps/
-│   ├── api/                         ← one Python image: api · worker · transcriber · flower · migrate
-│   │   ├── Dockerfile               ← targets: app, transcriber
-│   │   ├── pyproject.toml  uv.lock  ← managed by uv (deps + ruff + mypy + pytest config)
+│   ├── api/                         ← Python: api · worker · transcriber · flower · migrate
+│   │   ├── Dockerfile               ← targets: api (default), transcriber (+ faster-whisper, model)
+│   │   ├── pyproject.toml  uv.lock  ← managed by uv (deps + groups dev/transcribe, ruff, mypy, pytest)
 │   │   ├── alembic.ini
-│   │   ├── migrations/              ← env.py, versions/
+│   │   ├── migrations/              ← env.py, versions/0001…0006
 │   │   ├── src/pushtalk/
 │   │   │   ├── main.py              ← FastAPI app factory: middleware, error handlers, routers
-│   │   │   ├── core/                ← config, logging, errors, security (JWT, cookies), deps
-│   │   │   ├── db/                  ← declarative base, async session
-│   │   │   ├── infra/               ← storage (MinIO), audio (ffprobe/ffmpeg), redis, rate_limit
-│   │   │   ├── auth/                ← router · service · repository · models · schemas
-│   │   │   ├── channels/            ← same 5 files + presence
-│   │   │   ├── messages/            ← same 5 files + protected audio endpoint
-│   │   │   ├── dms/                 ← same 5 files
-│   │   │   ├── realtime/            ← WS routers, connection manager, Redis pub/sub bus, events
-│   │   │   ├── transcription/       ← provider protocol, providers/local.py, providers/openai.py
-│   │   │   └── worker/              ← celery_app, tasks/process_message, tasks/transcribe
-│   │   └── tests/                   ← conftest.py, unit/, integration/
+│   │   │   ├── health.py            ← GET /api/health (database, Redis)
+│   │   │   ├── core/                ← config, logging, errors, middleware, security, deps
+│   │   │   ├── db/                  ← declarative base, model registry, async session
+│   │   │   ├── infra/               ← storage (media volume), audio (ffprobe/ffmpeg), redis, rate_limit
+│   │   │   ├── auth/                ← router · service · repository · models · schemas · deps · errors
+│   │   │   ├── channels/            ← same layers + presence
+│   │   │   ├── messages/            ← same layers + processing (worker job) + receipts
+│   │   │   ├── directs/             ← router · service · repository · schemas · errors
+│   │   │   ├── realtime/            ← WS router, connection manager, pub/sub bus, players, sweeper
+│   │   │   ├── transcription/       ← transcribers (local, OpenAI, factory), job
+│   │   │   └── worker/              ← celery_app, tasks
+│   │   └── tests/                   ← conftest.py + one folder per feature
 │   └── web/
-│       ├── Dockerfile  nginx.conf   ← node build → nginx; proxies /api and /ws to api:8000
+│       ├── Dockerfile  nginx/       ← node build → nginx; proxies /api and /ws to the api
 │       ├── package.json  pnpm-lock.yaml  vite.config.ts  tsconfig.json  eslint.config.js  components.json
 │       └── src/
-│           ├── main.tsx  App.tsx  router.tsx
+│           ├── main.tsx
+│           ├── app/                 ← app, router, app shell (composes features)
 │           ├── features/
-│           │   ├── auth/            ← pages, api.ts, store.ts, session sync
-│           │   ├── channels/        ← list, room, members/presence, message store
-│           │   ├── voice/           ← Recorder, PlaybackQueue (+ tests), AudioPlayer, SpeedControl
-│           │   └── dms/             ← DirectList, UserPicker, /ws/me client
-│           ├── shared/
-│           │   ├── ui/              ← shadcn/ui components
-│           │   ├── lib/api/         ← ApiClient + generated schema.d.ts
-│           │   └── lib/ws/          ← WsClient, backoff, event types
-│           └── test/setup.ts
-├── infra/                           ← minio-init.sh and anything not owned by one app
+│           │   ├── auth/            ← pages, api, store, session refresh + tab sync
+│           │   ├── channels/        ← sidebar, browse, room, members/presence, message store, sending
+│           │   ├── voice/           ← Recorder, PlaybackQueue (+ tests), audio player, speed, banners
+│           │   └── directs/         ← DirectList, NewDirectDialog, /ws/me socket
+│           └── shared/
+│               ├── ui/              ← shadcn/ui components
+│               ├── lib/api/         ← ApiClient + generated schema.d.ts
+│               ├── lib/ws/          ← WsClient, backoff
+│               └── theme/  brand/  hooks/
 ├── specs/                           ← plans + diagrams
 ├── steps/                           ← environment setup guide
 ├── docker-compose.yml  docker-compose.dev.yml
@@ -117,7 +118,7 @@ Root `Makefile` (the only "monorepo glue"):
 up:        ; docker compose up --build
 dev:       ; docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 down:      ; docker compose down
-reset:     ; docker compose down -v          # wipe db + minio volumes
+reset:     ; docker compose down -v          # wipe database, Redis and media volumes
 logs:      ; docker compose logs -f api worker transcriber
 test:      test-api test-web
 test-api:  ; cd apps/api && uv run pytest
@@ -133,12 +134,12 @@ diagrams:  ; docker run --rm --user "$$(id -u):$$(id -g)" -e JAVA_TOOL_OPTIONS=-
 Reviewers clone the repository and run **one command**, with no `.env` file present. Checklist:
 
 - Compose uses `${VAR:-dev-default}` for every variable, so it starts without a `.env` file. `.env.example` documents the same keys. Real secrets are never committed; the dev JWT secret is explicitly named `dev-insecure-change-me`.
-- **Healthchecks** on postgres, redis and minio, plus `depends_on: condition: service_healthy`.
+- **Healthchecks** on postgres, redis and the api, plus `depends_on: condition: service_healthy`.
 - Redis runs with `appendonly yes` on a `redisdata` volume, so queued Celery tasks survive a restart.
-- **One-shot services**: `migrate` (alembic upgrade head) and `minio-init` (create bucket). `api`, `worker` and `transcriber` wait on them with `condition: service_completed_successfully`, so nothing races to migrate.
+- **One-shot service**: `migrate` (alembic upgrade head). `api`, `worker` and `transcriber` wait on it with `condition: service_completed_successfully`, so nothing races to migrate.
 - Only `web` (`8080`) and `flower` (`5555`) are published to the host. Everything else talks over the compose network. nginx proxies `/api` and `/ws` with WebSocket upgrade headers, so the browser sees a **single origin**: no CORS, and the auth cookies reach every endpoint.
-- The ffmpeg binary is installed in the api image (`apt-get install -y --no-install-recommends ffmpeg`). Both `api` (ffprobe validation) and `worker` (transcoding) need it.
-- `docker-compose.dev.yml` (committed) for hot reload: bind-mounted source, `uvicorn --reload`, Celery restarted on change with `watchfiles`, Vite dev server proxying `/api` and `/ws`, MinIO console. Run it with `make dev`.
+- Static ffmpeg and ffprobe binaries are copied into the api image (`mwader/static-ffmpeg`). Both `api` (ffprobe validation) and `worker` (transcoding) need them.
+- `docker-compose.dev.yml` (committed) for hot reload: bind-mounted source, `uvicorn --reload`, Celery restarted on change with `watchfiles`, Vite dev server proxying `/api` and `/ws`. Run it with `make dev`.
 - The `transcriber` service is built from a separate Dockerfile target that adds faster-whisper and downloads the `base` model **at build time**. The first `docker compose up` needs no extra steps, and the api/worker images stay small. Other model sizes (`WHISPER_MODEL`) download on first use into the `whisper-models` volume.
 
 See the [system architecture](system-architecture.svg) and [compose topology](deployment-compose.svg) diagrams in this folder.

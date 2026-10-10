@@ -9,46 +9,47 @@ top to bottom direction
 
 actor Browser
 
-rectangle "docker compose (network: pushtalk)" {
-  node "**web**\nnginx:alpine\nport 8080" as web
+rectangle "docker compose (project: pushtalk)" {
+  node "**web**\nnginx:1.30-alpine\nport 8080" as web
 
-  rectangle "one image built from apps/api (ffmpeg included)" as img {
+  rectangle "image pushtalk-api (apps/api, target api; ffmpeg included)" as img {
     node "**api**\nuvicorn pushtalk.main:app" as api
     node "**worker**\ncelery worker -Q audio" as worker
-    node "**transcriber**\ncelery worker -Q transcribe\n(image target with faster-whisper)" as transcriber
-    node "**flower**\ncelery flower\nport 5555" as flower
+    node "**flower**\ncelery flower\nport 5555, basic auth" as flower
     node "**migrate** (one-shot)\nalembic upgrade head" as migrate
   }
+  node "**transcriber**\nimage pushtalk-transcriber\n(target transcriber: + faster-whisper,\nbase model baked in)\ncelery worker -Q transcribe" as transcriber
 
   database "**postgres**\npostgres:16-alpine" as pg
   queue "**redis**\nredis:7-alpine\nappendonly yes" as redis
-  node "**minio**\nS3 storage" as minio
-  node "**minio-init** (one-shot)\ncreates bucket audio" as minioinit
 }
 
 rectangle "volumes" {
   storage pgdata
   storage redisdata
-  storage miniodata
-  storage whispermodels
+  storage media
+  storage "whisper-models" as whispermodels
 }
 
 Browser --> web : :8080
-Browser --> flower : :5555
+Browser --> flower : 127.0.0.1:5555
 web --> api : /api, /ws
 img --> pg
 img --> redis
-img --> minio
-minioinit --> minio
+transcriber --> pg
+transcriber --> redis
+api --> media
+worker --> media
+transcriber ..> media : read only
 pg --> pgdata
 redis --> redisdata
-minio --> miniodata
 transcriber ..> whispermodels
 
 legend bottom
-  **Start order** (depends_on): postgres, redis, minio healthy → migrate and minio-init finish → api, worker, transcriber, flower → web
-  **Connections:** api, worker and transcriber use postgres, redis and minio; migrate uses postgres; flower uses redis.
-  **whispermodels:** Whisper sizes other than the baked-in base model, downloaded on first use.
-  **docker-compose.dev.yml** adds: bind mounts, uvicorn --reload, Celery restart on change (watchfiles), Vite dev server :5173, minio console :9001.
+  **Start order** (depends_on): postgres and redis healthy → migrate finishes → api, worker, transcriber, flower → api healthy → web
+  **media:** uploads and processed Opus files, shared by api, worker and transcriber (read only).
+  **whisper-models:** starts as a copy of the image's base model; other sizes are downloaded here on first use.
+  **docker-compose.dev.yml** adds: postgres :5433 and redis :6380 on localhost, api :8001 with uvicorn --reload,
+  worker and transcriber restarted on code change (watchfiles); `pnpm dev` (:5173) proxies to the api.
 endlegend
 @enduml

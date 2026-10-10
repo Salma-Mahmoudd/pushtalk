@@ -17,18 +17,18 @@ entity "channels" as channels {
   --
   * kind : channel_kind
     -- group | direct
-    name : varchar(64)
-    -- required + UNIQUE for group; NULL for direct
+    name : varchar(50)
+    -- group only; UNIQUE on lower(name)
     dm_key : varchar(73) <<UNIQUE>>
     -- direct only: "{min(user_a,user_b)}:{max(...)}"
     -- guarantees one DM channel per user pair
   * created_by : uuid <<FK users.id>>
-  * last_seq : bigint default 0
+  * last_seq : int default 0
     -- per-channel sequence counter
   * created_at : timestamptz
   --
-  CHECK (kind='group' AND name IS NOT NULL
-      OR kind='direct' AND dm_key IS NOT NULL)
+  CHECK (kind='group' AND name IS NOT NULL AND dm_key IS NULL
+      OR kind='direct' AND name IS NULL AND dm_key IS NOT NULL)
 }
 
 entity "channel_members" as members {
@@ -47,30 +47,27 @@ entity "messages" as messages {
     -- idempotency key from the browser
   * status : message_status
     -- processing | ready | failed
-    seq : bigint
-    -- NULL until ready; assigned by worker
-  * mime_type : varchar(64)
-    -- sniffed server-side
-  * size_bytes : int
+    seq : int
+    -- NULL until ready; assigned by the worker
     duration_ms : int
-    -- from ffprobe, never from client
-    waveform : jsonb
-    -- int[] peaks 0..100 (e.g. 64 buckets)
-  * original_key : text
-    -- s3 key originals/{id}
-    audio_key : text
-    -- s3 key processed/{id}.ogg
-    failure_reason : varchar(64)
-  * transcript_status : transcript_status
-    -- pending | done | failed (set when ready)
+    -- from ffprobe, never from the client
+    waveform : smallint[]
+    -- 64 peaks, 0..100
+  * original_key : varchar(200)
+    -- originals/{random}.{ext} in the media volume (deleted once ready)
+    audio_key : varchar(200)
+    -- processed/{id}.ogg
+    failure_reason : varchar(100)
+    transcript_status : transcript_status
+    -- pending | done | failed; NULL when transcription is off
     transcript : text
-    transcript_lang : varchar(8)
+    transcript_lang : varchar(16)
   * created_at : timestamptz
     ready_at : timestamptz
   --
   UNIQUE (channel_id, seq)
   UNIQUE (sender_id, client_msg_id)
-  INDEX (channel_id, seq) WHERE status='ready'
+  INDEX (channel_id, created_at)
 }
 
 entity "message_receipts" as receipts {
@@ -104,6 +101,8 @@ note bottom of channels
   presence:{channel_id}  ZSET  member "{user_id}:{conn_id}", score = last heartbeat
     online = users with a member scored > now − 60 s (multi-tab + crash safe:
     a dead api pod stops heart-beating, its entries expire on their own)
-  ratelimit:{scope}:{key}  sliding-window counters (upload, login, signup, dm)
+    presence:00000000-0000-0000-0000-000000000000 = app-wide (/ws/me), for DM online dots
+  player:{channel_id}:{user_id}  the connection that plays the channel for that user
+  ratelimit:{scope}:{key}  sliding-window ZSETs (login, signup, upload, channel and DM creation)
 end note
 @enduml

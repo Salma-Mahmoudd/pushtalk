@@ -2,7 +2,9 @@ name: pushtalk
 
 # Shared by the API image's services (api, worker, flower, migrate): build and settings.
 x-api: &api
-  build: ./apps/api
+  build:
+    context: ./apps/api
+    target: api
   image: pushtalk-api
   environment:
     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-pushtalk}:${POSTGRES_PASSWORD:-pushtalk}@postgres:5432/${POSTGRES_DB:-pushtalk}
@@ -14,6 +16,12 @@ x-api: &api
     ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080,http://localhost:5173}
     JWT_SECRET: ${JWT_SECRET:-dev-insecure-change-me-local-development-only}
     COOKIE_SECURE: ${COOKIE_SECURE:-true}
+    TRANSCRIBE_PROVIDER: ${TRANSCRIBE_PROVIDER:-local}
+    WHISPER_MODEL: ${WHISPER_MODEL:-base}
+    WHISPER_MODEL_DIR: /models
+    TRANSCRIBE_LANGUAGE: ${TRANSCRIBE_LANGUAGE:-}
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    OPENAI_TRANSCRIBE_MODEL: ${OPENAI_TRANSCRIBE_MODEL:-gpt-4o-mini-transcribe}
 
 services:
   postgres:
@@ -84,6 +92,27 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Speech to text for ready messages, from the "transcribe" queue (one at a time: CPU heavy).
+  transcriber:
+    <<: *api
+    build:
+      context: ./apps/api
+      target: transcriber
+      args:
+        WHISPER_MODEL: ${WHISPER_MODEL:-base}
+    image: pushtalk-transcriber
+    command: ["celery", "-A", "pushtalk.worker.celery_app", "worker", "-Q", "transcribe", "--concurrency", "1", "--loglevel", "INFO"]
+    volumes:
+      - media:/data/media:ro
+      # Starts as a copy of the image's /models (the base model); other sizes are added here.
+      - whisper-models:/models
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   # Celery dashboard: tasks, retries, failures. Localhost only, behind basic auth.
   flower:
     <<: *api
@@ -111,3 +140,4 @@ volumes:
   pgdata:
   redisdata:
   media:
+  whisper-models:

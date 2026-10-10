@@ -24,3 +24,10 @@ services:
     volumes:
       - ./apps/api/src:/app/src:ro
       - media:/data/media
+
+  transcriber:
+    command: ["watchfiles", "--filter", "python", "celery -A pushtalk.worker.celery_app worker -Q transcribe --concurrency 1 --loglevel INFO", "/app/src"]
+    volumes:
+      - ./apps/api/src:/app/src:ro
+      - media:/data/media:ro
+      - whisper-models:/models

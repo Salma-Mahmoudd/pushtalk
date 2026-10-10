@@ -2,6 +2,7 @@
 
 import tempfile
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,9 +15,10 @@ from pushtalk.auth.models import User
 from pushtalk.channels.repository import ChannelRepository
 from pushtalk.infra import audio
 from pushtalk.infra.storage import FileStorage
-from pushtalk.messages.models import Message, MessageStatus
+from pushtalk.messages.models import Message, MessageStatus, TranscriptStatus
 from pushtalk.messages.repository import MessageRepository, to_out
 from pushtalk.realtime.bus import EventBus, channel_topic, event, user_topic
+from pushtalk.transcription.job import fail_transcription
 
 log = structlog.get_logger(__name__)
 
@@ -26,6 +28,8 @@ class ProcessingContext:
     sessionmaker: async_sessionmaker[AsyncSession]
     storage: FileStorage
     bus: EventBus
+    # Queues the transcription step; None when transcription is off.
+    enqueue_transcription: Callable[[uuid.UUID], Awaitable[None]] | None = None
 
 
 async def process_message(message_id: uuid.UUID, ctx: ProcessingContext) -> None:
@@ -63,6 +67,8 @@ async def process_message(message_id: uuid.UUID, ctx: ProcessingContext) -> None
         message.waveform = waveform
         message.audio_key = audio_key
         message.ready_at = datetime.now(UTC)
+        if ctx.enqueue_transcription is not None:
+            message.transcript_status = TranscriptStatus.pending
         sender = await session.get(User, message.sender_id)
         assert sender is not None  # The foreign key guarantees it.
         out = to_out(message, sender.username)
@@ -72,6 +78,22 @@ async def process_message(message_id: uuid.UUID, ctx: ProcessingContext) -> None
         channel_topic(out.channel_id), event("message.ready", **out.model_dump(mode="json"))
     )
     log.info("processing.ready", message_id=str(message_id), seq=out.seq, duration_ms=duration_ms)
+    # After the broadcast, so delivery never waits for speech to text.
+    if ctx.enqueue_transcription is not None:
+        await _queue_transcription(message_id, ctx.enqueue_transcription, ctx)
+
+
+async def _queue_transcription(
+    message_id: uuid.UUID,
+    enqueue: Callable[[uuid.UUID], Awaitable[None]],
+    ctx: ProcessingContext,
+) -> None:
+    try:
+        await enqueue(message_id)
+    except Exception:
+        # The message is delivered already; without a queued job its transcript never comes.
+        log.exception("transcription.enqueue_failed", message_id=str(message_id))
+        await fail_transcription(message_id, ctx)
 
 
 async def fail_message(message_id: uuid.UUID, reason: str, ctx: ProcessingContext) -> None:

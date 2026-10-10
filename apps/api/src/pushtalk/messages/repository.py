@@ -20,6 +20,9 @@ def to_out(message: Message, username: str) -> MessageOut:
         waveform=message.waveform,
         failure_reason=message.failure_reason,
         created_at=message.created_at,
+        transcript_status=message.transcript_status,
+        transcript=message.transcript,
+        transcript_lang=message.transcript_lang,
     )
 
 

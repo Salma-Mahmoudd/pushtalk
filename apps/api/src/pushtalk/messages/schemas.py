@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from pushtalk.messages.models import MessageStatus
+from pushtalk.messages.models import MessageStatus, TranscriptStatus
 
 
 class SenderOut(BaseModel):
@@ -37,6 +37,10 @@ class MessageOut(BaseModel):
     waveform: list[int] | None
     failure_reason: str | None
     created_at: datetime
+    # None when transcription is off; text arrives later in a message.transcribed event.
+    transcript_status: TranscriptStatus | None = None
+    transcript: str | None = None
+    transcript_lang: str | None = None
     # Only on the caller's own messages.
     receipts: ReceiptSummary | None = None
 

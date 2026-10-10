@@ -41,7 +41,10 @@ src/pushtalk/
     processing.py Worker job: Opus/OGG, duration, waveform, seq, broadcast; failures tell the sender
     receipts.py   Delivered/played reports, counts per message, per-recipient details (sender only)
     router.py     Upload (202), history pages, protected audio (members only, Range support), receipts
-  worker/         Celery app (Redis broker, queue "audio", acks late) and the retrying task
+  transcription/  Speech to text after a message is ready (queue "transcribe")
+    transcribers.py Providers: local faster-whisper, OpenAI; get_transcriber picks one from settings
+    job.py        Saves the transcript (or "failed") and publishes message.transcribed
+  worker/         Celery app (Redis broker, queues "audio" and "transcribe", acks late) and the tasks
   channels/       Channels, membership and presence (see specs/chat/plan.md)
     models.py     channels, channel_members
     presence.py   Online users: one expiring Redis entry per connection
@@ -81,6 +84,18 @@ migrations/       Alembic (async template); env.py reads DATABASE_URL
 tests/            pytest suite; database tests use a migrated `pushtalk_test` database
                   (each test rolled back) and are skipped when PostgreSQL is not running
 ```
+
+## Transcription
+
+Every ready message is transcribed by a second Celery step, after `message.ready` is broadcast, so playback never waits for it. The `transcriber` service (image target `transcriber` in the [`Dockerfile`](Dockerfile)) serves the `transcribe` queue one job at a time; the API and audio worker image stays without the speech libraries.
+
+| `TRANSCRIBE_PROVIDER` | What happens |
+| --- | --- |
+| `local` (default) | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) on the CPU (int8). The `base` model is downloaded when the image is built, so the first `docker compose up` works offline. `WHISPER_MODEL=small` (or `tiny`, `medium`, `large-v3`) is fetched into the `whisper-models` volume on first use; set it before building to bake it into the image instead. |
+| `openai` | OpenAI's transcription endpoint (`OPENAI_TRANSCRIBE_MODEL`, default `gpt-4o-mini-transcribe`). Needs `OPENAI_API_KEY`; the API refuses to start without it. The audio leaves the server. |
+| `off` | No transcription step; messages carry no transcript. |
+
+`TRANSCRIBE_LANGUAGE` (for example `en` or `ar`) fixes the language; empty detects it per message. A job is retried twice, then the transcript is marked `failed` and the message stays playable. Messages carry `transcript_status` (`pending`, `done`, `failed`), `transcript` and `transcript_lang`; the channel gets `message.transcribed` when the text is ready. Locally, `uv sync` installs the `transcribe` group too, so tests and mypy cover it.
 
 ## Rate limits
 

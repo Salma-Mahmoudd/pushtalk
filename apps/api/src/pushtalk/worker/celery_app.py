@@ -8,6 +8,7 @@ from pushtalk.core.config import get_settings
 from pushtalk.core.logging import configure_logging
 
 PROCESS_MESSAGE = "process_message"
+TRANSCRIBE_MESSAGE = "transcribe_message"
 
 settings = get_settings()
 
@@ -21,7 +22,8 @@ celery_app.conf.update(
     # One task at a time per worker process, so a long task never holds others back.
     worker_prefetch_multiplier=1,
     task_ignore_result=True,
-    task_routes={PROCESS_MESSAGE: {"queue": "audio"}},
+    # "transcribe" is served by its own worker (the transcriber image, with the speech model).
+    task_routes={PROCESS_MESSAGE: {"queue": "audio"}, TRANSCRIBE_MESSAGE: {"queue": "transcribe"}},
     task_default_queue="audio",
     task_time_limit=180,
     task_soft_time_limit=150,
@@ -39,4 +41,11 @@ async def enqueue_message_processing(message_id: uuid.UUID) -> None:
     """Called by the API after a message is stored; sending to the broker is blocking I/O."""
     await asyncio.to_thread(
         celery_app.send_task, PROCESS_MESSAGE, args=[str(message_id)], queue="audio"
+    )
+
+
+async def enqueue_transcription(message_id: uuid.UUID) -> None:
+    """Called by the audio worker once a message is ready and broadcast."""
+    await asyncio.to_thread(
+        celery_app.send_task, TRANSCRIBE_MESSAGE, args=[str(message_id)], queue="transcribe"
     )

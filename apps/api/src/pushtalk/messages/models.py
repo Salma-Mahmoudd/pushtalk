@@ -9,6 +9,7 @@ from sqlalchemy import (
     Index,
     SmallInteger,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -21,6 +22,12 @@ from pushtalk.db.base import Base
 class MessageStatus(enum.StrEnum):
     processing = "processing"
     ready = "ready"
+    failed = "failed"
+
+
+class TranscriptStatus(enum.StrEnum):
+    pending = "pending"
+    done = "done"
     failed = "failed"
 
 
@@ -50,6 +57,12 @@ class Message(Base):
     failure_reason: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set to pending when the message becomes ready; None when transcription is off.
+    transcript_status: Mapped[TranscriptStatus | None] = mapped_column(
+        Enum(TranscriptStatus, name="transcript_status")
+    )
+    transcript: Mapped[str | None] = mapped_column(Text)
+    transcript_lang: Mapped[str | None] = mapped_column(String(16))
 
 
 class MessageReceipt(Base):

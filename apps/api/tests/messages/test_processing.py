@@ -1,7 +1,6 @@
 import asyncio
-import json
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +13,7 @@ from pushtalk.infra.storage import FileStorage
 from pushtalk.messages.models import Message, MessageStatus
 from pushtalk.messages.processing import ProcessingContext, process_message
 from pushtalk.realtime.bus import EventBus
-from tests.helpers import create_channel, signup
+from tests.helpers import create_channel, published_events, signup
 from tests.recordings import make_recording, requires_ffmpeg
 
 pytestmark = [pytest.mark.integration, requires_ffmpeg]
@@ -41,23 +40,6 @@ async def _accepted(client: AsyncClient, channel_id: str, path: Path) -> uuid.UU
     return uuid.UUID(response.json()["id"])
 
 
-async def _events(
-    fake_redis: FakeAsyncRedis, topic: str, run: Callable[[], Awaitable[None]]
-) -> list[dict[str, Any]]:
-    pubsub = fake_redis.pubsub(ignore_subscribe_messages=True)
-    await pubsub.subscribe(topic)
-    await run()
-    events = []
-    # Read for a short window: subscription confirmations come back as None too.
-    deadline = asyncio.get_running_loop().time() + 0.5
-    while asyncio.get_running_loop().time() < deadline:
-        message = await pubsub.get_message(timeout=0.05)
-        if message is not None:
-            events.append(json.loads(message["data"]))
-    await pubsub.aclose()  # type: ignore[no-untyped-call]
-    return events
-
-
 @pytest.fixture
 async def setup(db_client: AsyncClient) -> tuple[dict[str, Any], str]:
     alice = await signup(db_client, "alice")
@@ -78,7 +60,9 @@ async def test_processing_makes_the_message_ready_and_broadcasts_it(
         db_client, channel_id, make_recording(tmp_path / "a.webm", 2, streamed=True)
     )
 
-    events = await _events(fake_redis, f"ch:{channel_id}", lambda: process_message(message_id, ctx))
+    events = await published_events(
+        fake_redis, f"ch:{channel_id}", lambda: process_message(message_id, ctx)
+    )
 
     async with db_sessionmaker() as session:
         message = await session.get(Message, message_id)
@@ -129,7 +113,7 @@ async def test_unreadable_audio_fails_and_tells_the_sender(
         original = accepted.original_key
     ctx.storage.path(original).write_bytes(b"\x1a\x45\xdf\xa3 corrupted after upload")
 
-    events = await _events(
+    events = await published_events(
         fake_redis, f"user:{alice['id']}", lambda: process_message(message_id, ctx)
     )
 
@@ -156,7 +140,9 @@ async def test_processing_twice_changes_nothing(
     message_id = await _accepted(db_client, channel_id, make_recording(tmp_path / "a.webm", 1))
     await process_message(message_id, ctx)
 
-    events = await _events(fake_redis, f"ch:{channel_id}", lambda: process_message(message_id, ctx))
+    events = await published_events(
+        fake_redis, f"ch:{channel_id}", lambda: process_message(message_id, ctx)
+    )
 
     async with db_sessionmaker() as session:
         message = await session.get(Message, message_id)

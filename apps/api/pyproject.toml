@@ -30,6 +30,17 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "ruff>=0.17.0",
 ]
+# Speech to text; only the transcriber image installs it (the API image skips all groups).
+transcribe = [
+    # faster-whisper 1.2 opens audio with an argument PyAV 19 removed (metadata_errors).
+    "av>=15,<19",
+    "faster-whisper>=1.2.1",
+    "httpx>=0.28.1",
+]
+
+[tool.uv]
+# Local development gets every group, so tests and mypy see the transcriber's libraries.
+default-groups = ["dev", "transcribe"]
 
 [build-system]
 requires = ["uv_build>=0.12.22,<0.13.0"]
@@ -55,6 +66,11 @@ select = [
 strict = true
 python_version = "3.12"
 files = ["src", "tests", "migrations"]
+
+[[tool.mypy.overrides]]
+# Ships without type information.
+module = ["faster_whisper", "faster_whisper.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

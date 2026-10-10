@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, PostgresDsn, RedisDsn, SecretStr, field_validator
+from pydantic import Field, PostgresDsn, RedisDsn, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 DEV_JWT_SECRET = "dev-insecure-change-me-local-development-only"
@@ -47,6 +47,18 @@ class Settings(BaseSettings):
     # Celery broker (Redis database 1, apart from pub/sub and presence in database 0).
     celery_broker_url: RedisDsn = RedisDsn("redis://localhost:6380/1")
 
+    # Transcription: a second worker step after a message is ready; "off" skips it.
+    transcribe_provider: Literal["local", "openai", "off"] = "local"
+    # faster-whisper model (tiny, base, small, medium, large-v3, ...); the image ships "base",
+    # other models are downloaded into whisper_model_dir on first use.
+    whisper_model: str = "base"
+    whisper_model_dir: Path = Path("var/whisper-models")
+    # A language code such as "en" or "ar"; empty detects the language of each message.
+    transcribe_language: str = ""
+    # Only for transcribe_provider="openai".
+    openai_api_key: SecretStr | None = None
+    openai_transcribe_model: str = "gpt-4o-mini-transcribe"
+
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["json", "console"] = "json"
     # Origins allowed to send state-changing requests and open WebSockets (CSRF protection).
@@ -62,6 +74,19 @@ class Settings(BaseSettings):
         if len(value.get_secret_value().encode()) < 32:
             raise ValueError("JWT_SECRET must be at least 32 bytes long")
         return value
+
+    @field_validator("openai_api_key", mode="before")
+    @classmethod
+    def blank_key_is_none(cls, value: object) -> object:
+        """Compose passes an unset OPENAI_API_KEY as an empty string."""
+        secret = value.get_secret_value() if isinstance(value, SecretStr) else value
+        return None if secret == "" else value
+
+    @model_validator(mode="after")
+    def openai_needs_a_key(self) -> "Settings":
+        if self.transcribe_provider == "openai" and self.openai_api_key is None:
+            raise ValueError("TRANSCRIBE_PROVIDER=openai needs OPENAI_API_KEY")
+        return self
 
     @field_validator("allowed_origins", mode="before")
     @classmethod

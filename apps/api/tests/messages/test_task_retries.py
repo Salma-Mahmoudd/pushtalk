@@ -26,3 +26,20 @@ def test_infrastructure_errors_retry_then_fail_the_message(jobs: list[str]) -> N
     tasks.process_message_task.apply(args=(str(uuid.uuid4()),))
 
     assert jobs == ["process_message"] * (tasks.MAX_RETRIES + 1) + ["fail_message"]
+
+
+def test_transcription_errors_retry_then_fail_the_transcript(
+    jobs: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tasks, "_transcriber", lambda: object())
+
+    async def failing_context(job: Callable[[ProcessingContext], Awaitable[None]]) -> None:
+        name = "fail_transcription" if "fail_transcription" in job.__code__.co_names else "job"
+        jobs.append(name)
+        if name == "job":
+            raise TimeoutError("model too slow")
+
+    monkeypatch.setattr(tasks, "_with_context", failing_context)
+    tasks.transcribe_message_task.apply(args=(str(uuid.uuid4()),))
+
+    assert jobs == ["job"] * (tasks.TRANSCRIBE_RETRIES + 1) + ["fail_transcription"]

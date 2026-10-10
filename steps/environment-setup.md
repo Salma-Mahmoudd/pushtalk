@@ -36,6 +36,12 @@ Only Docker is required to run the app. The other tools are for development outs
 
 Run every command from the repository root.
 
+**0. Local configuration.** Settings and credentials come from environment variables. `.env.example` lists every one with a safe development default; copy it to `.env` (never committed) and change values there. Without a `.env`, the defaults apply.
+
+```bash
+cp .env.example .env
+```
+
 **1. Node**, version read from `.nvmrc`:
 
 ```bash

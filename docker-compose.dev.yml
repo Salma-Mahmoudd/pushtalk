@@ -1,0 +1,11 @@
+# Development additions, used together with docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Publishes the services on localhost only, so the API can run outside Docker.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
+
+  redis:
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-6380}:6379"

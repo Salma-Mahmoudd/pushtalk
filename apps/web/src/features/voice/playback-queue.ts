@@ -113,6 +113,13 @@ export class PlaybackQueue {
     this.advance()
   }
 
+  /** Another tab or device of the user played this message: it is not played again here. */
+  discard(messageId: string): void {
+    const before = this.items.length
+    this.items = this.items.filter((item) => item.id !== messageId)
+    if (this.items.length !== before) this.emit()
+  }
+
   /** The user picked a message: it plays now; an interrupted message goes back in line. */
   playNow(item: QueueItem): void {
     this.seen.add(item.seq)

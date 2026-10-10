@@ -71,6 +71,7 @@ Each decision lists the options considered, the choice, the reasons, and the tra
 
 - Each tab has its own WebSocket per channel, so a tab showing another channel never receives this channel's audio.
 - The first connection on a channel claims playback automatically; afterwards a tab sends `playback.claim` when it gains focus. The server records the player in Redis and sends `playback.claimed {connection_id}` to all of the user's connections on the channel: the named one plays, the others go quiet. Every new connection is told the current player right away, so a tab opened in the background stays silent. When the player closes, `connection_id: null` lets the focused tab take over; without a focused tab, each tab asks a second later and the server lets only the first one play.
+- When a message has played, all of the user's connections hear about it (`message.played`) and drop it from their queues, so a tab that takes over with "Play here" continues with what is still unheard instead of repeating it.
 - A tab that loses its connection stops playing at once and waits for the server's answer after reconnecting: another tab may have taken over meanwhile, and the same message must never play twice.
 - "Last focused" instead of "currently focused": a walkie-talkie must keep working while the browser is in the background, when no tab has focus.
 - Inactive connections still show messages and send `delivered`; a "Play here" button moves playback to them. `played` is idempotent, so the first play wins.

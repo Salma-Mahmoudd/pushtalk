@@ -224,4 +224,14 @@ describe('PlaybackQueue', () => {
     locked.setActive(true)
     expect(locked.snapshot().state).toBe('locked')
   })
+
+  it('drops a waiting message that another tab played, so taking over does not repeat it', () => {
+    queue.setActive(false)
+    queue.enqueue(item(1))
+    queue.enqueue(item(2))
+    queue.discard('m1')
+    queue.setActive(true)
+
+    expect(player.played).toEqual(['/a/2'])
+  })
 })

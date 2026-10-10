@@ -266,3 +266,22 @@ async def test_a_failing_event_does_not_close_the_connection(
         await ws.next_event("pong")  # still connected
 
     assert error["data"]["code"] == "event_failed"
+
+
+async def test_playing_a_message_tells_the_listeners_other_tabs(
+    db_app: FastAPI, room: dict[str, Any]
+) -> None:
+    path = f"/ws/channels/{room['channel']['id']}"
+    first = room["ids"][0]
+    async with WsClient(db_app, path, _cookies(room["bob_client"])) as tab_1:
+        await tab_1.accepted()
+        await tab_1.next_event("presence.snapshot")
+        async with WsClient(db_app, path, _cookies(room["bob_client"])) as tab_2:
+            await tab_2.accepted()
+            await tab_2.next_event("presence.snapshot")
+            await tab_1.send_json(
+                {"type": "receipt", "data": {"message_id": first, "status": "played"}}
+            )
+            heard = await tab_2.next_event("message.played")
+
+    assert heard["data"] == {"message_id": first, "channel_id": room["channel"]["id"]}

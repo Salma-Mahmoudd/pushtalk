@@ -79,7 +79,11 @@ function ChannelRoom({ channelId }: { channelId: string }) {
     [queue, report, userId],
   )
   const onPlaybackActive = useCallback((active: boolean) => queue.setActive(active), [queue])
-  const handlers = useMemo(() => ({ onIncoming, onPlaybackActive }), [onIncoming, onPlaybackActive])
+  const onPlayedElsewhere = useCallback((messageId: string) => queue.discard(messageId), [queue])
+  const handlers = useMemo(
+    () => ({ onIncoming, onPlaybackActive, onPlayedElsewhere }),
+    [onIncoming, onPlaybackActive, onPlayedElsewhere],
+  )
 
   const socket = useChannelSocket(channelId, isMember, handlers)
   useEffect(() => {

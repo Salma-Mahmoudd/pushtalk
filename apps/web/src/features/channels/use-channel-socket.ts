@@ -23,6 +23,8 @@ interface SocketHandlers {
   onIncoming: (messages: MessageOut[], options: IncomingOptions) => void
   /** Whether this tab is the one that plays the channel's audio. */
   onPlaybackActive: (active: boolean) => void
+  /** The user played this message in another tab or on another device. */
+  onPlayedElsewhere: (messageId: string) => void
 }
 
 export interface ChannelSocket {
@@ -97,6 +99,11 @@ export function useChannelSocket(channelId: string, enabled: boolean, handlers: 
         case 'message.ready': {
           const message = data as unknown as MessageOut
           if (message.channel_id === channelId) void receive([message], true)
+          break
+        }
+        case 'message.played': {
+          const played = data as { message_id: string; channel_id: string }
+          if (played.channel_id === channelId) handlersRef.current.onPlayedElsewhere(played.message_id)
           break
         }
         case 'message.transcribed': {

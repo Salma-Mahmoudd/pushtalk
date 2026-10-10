@@ -70,6 +70,7 @@ Envelope: `{ "type": "...", "data": {...} }`
 | S→C | `message.failed` | `{id, channel_id, client_msg_id, reason}`, sender's connections only |
 | S→C | `member.joined` | `{user_id, username}`; rooms refresh their member list |
 | S→C | `receipt.updated` | `{message_id, channel_id, delivered, played, total, recipient: {user_id, username, delivered_at, played_at}}`, sender only |
+| S→C | `message.played` | `{message_id, channel_id}` to all of the listener's connections once they played it; other tabs drop it from their queues |
 | S→C | `message.transcribed` | `{id, channel_id, transcript_status: "done"\|"failed", transcript, transcript_lang}` |
 | S→C | `playback.claimed` | `{channel_id, connection_id}`: the connection that plays now (`null`: nobody); also sent to every new connection right after `hello` |
 | S→C | `error` | `{code, message}`, e.g. `rate_limited` (event dropped) or `unknown_event` |

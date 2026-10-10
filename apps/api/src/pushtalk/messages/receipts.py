@@ -71,6 +71,12 @@ class ReceiptService:
             return  # Nothing new (a repeat, or another tab was first): no event.
         await self._session.commit()
 
+        if status == "played":
+            # The user's other tabs and devices drop it from their queues: heard once is enough.
+            await self._bus.publish(
+                user_topic(user_id),
+                event("message.played", message_id=str(message_id), channel_id=str(channel_id)),
+            )
         summary = await self.summary(message)
         username = await self._session.scalar(select(User.username).where(User.id == user_id))
         await self._bus.publish(

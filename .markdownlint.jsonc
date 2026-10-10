@@ -5,8 +5,8 @@
   "MD013": false,
   // Tables use the compact style: "| a | b |" and "| --- | --- |"
   "MD060": { "style": "compact" },
-  // HTML only for the centered logo with light/dark variants in README.md
-  "MD033": { "allowed_elements": ["p", "picture", "source", "img", "strong", "br"] },
+  // HTML only for the centered logo with light/dark variants and the folded chapter list in README.md
+  "MD033": { "allowed_elements": ["p", "picture", "source", "img", "strong", "br", "details", "summary"] },
   // README.md starts with the logo instead of a heading
   "MD041": false
 }

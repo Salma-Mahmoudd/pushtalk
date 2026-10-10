@@ -9,6 +9,45 @@
 
 ---
 
+## Demo
+
+**[▶ Watch the demo video (5 min)](https://drive.google.com/file/d/1p8iM2jT0y1LEyWiVE9owC-l35ZImoEIG/view?usp=sharing)**
+
+Four browsers side by side (Alice, Bob, Bob's second tab and phone, then Carol), recorded on a fresh `docker compose up`. Each step has on-screen notes, and the sound is the voice messages as they played.
+
+<details>
+<summary>Chapters</summary>
+
+| Time | Step |
+| --- | --- |
+| 0:00 | Walkie-talkie voice channels in the browser |
+| 0:08 | Step 1: Sign up (inputs are validated) |
+| 0:21 | Step 2: Create, browse and join channels |
+| 0:32 | Step 3: Live presence |
+| 0:40 | Step 4: Push to talk: too short is ignored |
+| 0:47 | Step 5: Send a voice message |
+| 0:57 | Step 6: Delivered, played and the transcript |
+| 1:12 | Step 7: Strict order, one at a time |
+| 1:24 | Step 8: A message arrives while recording |
+| 1:37 | Step 9: Playback speed 1× / 1.5× / 2× |
+| 1:44 | Step 10: Browsers block audio until the first tap |
+| 1:57 | Step 11: Replay any message |
+| 2:03 | Step 12: Bob opens a second tab |
+| 2:24 | Step 13: Closing a tab |
+| 2:33 | Step 14: Bob on a second device |
+| 2:55 | Step 15: Two channels at the same time |
+| 3:09 | Step 16: Connection lost: reconnect and catch up |
+| 3:21 | Step 17: A failed send can be retried |
+| 3:35 | Step 18: Log out, and rate limits |
+| 3:48 | Step 19: Three people in a channel |
+| 4:10 | Step 20: Direct messages |
+| 4:26 | Step 21: Direct messages stay private |
+| 4:34 | Step 22: Protected audio and validated uploads |
+| 4:48 | Step 23: Light and dark themes |
+| 4:55 | What runs underneath |
+
+</details>
+
 ## Quick start
 
 Requires Docker with Compose v2. From the repository root:

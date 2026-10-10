@@ -1,0 +1,51 @@
+[project]
+name = "pushtalk"
+version = "0.1.0"
+description = "PushTalk API: walkie-talkie voice channels (FastAPI, Celery workers)."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.143.0",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.17.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.22,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+  "E", "W",   # pycodestyle
+  "F",        # pyflakes
+  "I",        # import order
+  "UP",       # newer Python syntax
+  "B",        # likely bugs
+  "SIM",      # simplifications
+  "ASYNC",    # blocking calls in async code
+  "RUF",      # ruff-specific checks
+]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+packages = ["pushtalk"]
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra --strict-markers"

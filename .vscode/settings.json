@@ -1,0 +1,25 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/apps/api/.venv/bin/python",
+  "pylint.enabled": false,
+  "mypy-type-checker.cwd": "${workspaceFolder}/apps/api",
+  "mypy-type-checker.importStrategy": "fromEnvironment",
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true
+  },
+  "eslint.workingDirectories": [
+    "apps/web"
+  ],
+  "files.exclude": {
+    "**/.mypy_cache": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true
+  },
+  "python-envs.pythonProjects": [
+    {
+      "path": "apps/api",
+      "envManager": "ms-python.python:venv",
+      "packageManager": "ms-python.python:pip"
+    }
+  ]
+}

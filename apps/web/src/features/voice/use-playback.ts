@@ -4,6 +4,7 @@ import { refreshOnce } from '@/shared/lib/api/client'
 
 import { HtmlAudioPlayer } from './html-audio-player'
 import { PlaybackQueue, type QueueItem, type QueueSnapshot } from './playback-queue'
+import { usePlaybackSettings } from './playback-settings'
 
 /** One playback queue for the open room; the first tap or key press anywhere unlocks audio. */
 export function usePlayback(onPlayed: (item: QueueItem) => void): { queue: PlaybackQueue; snapshot: QueueSnapshot } {
@@ -15,6 +16,11 @@ export function usePlayback(onPlayed: (item: QueueItem) => void): { queue: Playb
         onChange: setSnapshot,
       }),
   )
+
+  const rate = usePlaybackSettings((settings) => settings.rate)
+  useEffect(() => {
+    queue.setRate(rate)
+  }, [queue, rate])
 
   useEffect(() => {
     queue.setOnPlayed(onPlayed)

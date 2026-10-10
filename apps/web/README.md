@@ -75,6 +75,7 @@ TanStack Query holds data from the API (channels, members); creating or joining 
 - **What autoplays:** messages that arrive live, and messages caught up after a reconnect. Opening a room or reloading the page shows history without playing it.
 - **Browser autoplay rules:** audio starts only after the user has interacted with the page. Arriving through a click (for example on the channel link) counts; otherwise a banner shows how many messages are waiting, and the first tap or key press anywhere starts them.
 - **While recording:** playback pauses when push-to-talk starts and resumes after release.
+- **Speed:** 1×, 1.5× or 2× from the room header, pitch preserved. It applies to the message playing now without restarting it and to every later one, and is saved in `localStorage` (`features/voice/playback-settings.ts`).
 - **Manual play:** the play button on any message interrupts the queue; the queue continues afterwards.
 - **One playing tab per user:** each socket can claim playback (`playback.claim`). The focused tab claims on open and on focus; other tabs and devices of the same user show "Playing in another tab or device" with a "Play here" button.
 - **Receipts:** the room reports `delivered` when a message arrives and `played` when it plays to the end. Senders see "Delivered n/m" or "Played n/m" under their messages, live, and a click opens the per-person times.

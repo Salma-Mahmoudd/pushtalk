@@ -5,6 +5,7 @@ import { useParams } from 'react-router'
 import { useAuthStore } from '@/features/auth/store'
 import { AudioUnlockBanner, PlayHereBanner } from '@/features/voice/components/playback-banners'
 import { PttButton } from '@/features/voice/components/ptt-button'
+import { SpeedControl } from '@/features/voice/components/speed-control'
 import type { QueueItem } from '@/features/voice/playback-queue'
 import { usePlayback } from '@/features/voice/use-playback'
 import { ApiError } from '@/shared/lib/api/client'
@@ -118,9 +119,10 @@ function ChannelRoom({ channelId }: { channelId: string }) {
         <header className="flex items-center gap-2 border-b px-4 py-3">
           <HashIcon className="size-4 text-muted-foreground" />
           <h1 className="truncate font-semibold">{channel.data?.name}</h1>
-          <span className="ms-auto">
+          <div className="ms-auto flex items-center gap-3">
+            <SpeedControl />
             <ConnectionStatus state={socket.state} />
-          </span>
+          </div>
         </header>
         <AudioUnlockBanner snapshot={snapshot} />
         <PlayHereBanner snapshot={snapshot} onPlayHere={socket.claimPlayback} />

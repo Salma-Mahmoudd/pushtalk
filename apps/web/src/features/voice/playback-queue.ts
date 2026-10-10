@@ -14,6 +14,8 @@ export interface AudioPlayer {
   pause: () => void
   resume: () => Promise<void>
   stop: () => void
+  /** Speed for the current source and every later one, pitch preserved. */
+  setRate: (rate: number) => void
   /** Called from a user gesture: allows later playback without one (autoplay policy). */
   unlock: () => Promise<void>
   onEnded: (callback: () => void) => void
@@ -65,6 +67,11 @@ export class PlaybackQueue {
     this.seen.add(item.seq)
     this.insert(item)
     this.advance()
+  }
+
+  /** Playback speed: changes the playing message without restarting it, and applies to all later ones. */
+  setRate(rate: number): void {
+    this.options.player.setRate(rate)
   }
 
   /** First user gesture: buffered messages start playing in order. */

@@ -9,6 +9,7 @@ class FakeAudioPlayer implements AudioPlayer {
   paused = false
   failNext = false
   unlocked = false
+  rate = 1
   private ended: () => void = () => {}
   private errored: () => void = () => {}
 
@@ -29,6 +30,9 @@ class FakeAudioPlayer implements AudioPlayer {
   })
   stop = vi.fn(() => {
     this.playing = null
+  })
+  setRate = vi.fn((rate: number) => {
+    this.rate = rate
   })
   unlock = vi.fn(async () => {
     this.unlocked = true
@@ -198,5 +202,17 @@ describe('PlaybackQueue', () => {
 
     expect(player.played).toEqual(['/a/1', '/a/2'])
     expect(onPlayed).not.toHaveBeenCalled()
+  })
+
+  it('changes speed mid-message without restarting, and keeps it for the next ones', () => {
+    queue.enqueue(item(1))
+    queue.enqueue(item(2))
+    queue.setRate(1.5)
+
+    expect(player.rate).toBe(1.5)
+    expect(player.played).toEqual(['/a/1']) // not restarted
+    player.end()
+    expect(player.played).toEqual(['/a/1', '/a/2'])
+    expect(player.rate).toBe(1.5)
   })
 })

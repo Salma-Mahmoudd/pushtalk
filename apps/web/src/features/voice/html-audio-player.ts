@@ -30,6 +30,7 @@ export class HtmlAudioPlayer implements AudioPlayer {
   private readonly audio = new Audio()
   private readonly preloader = new Audio()
   private playing = false
+  private rate = 1
   private ended: () => void = () => {}
   private errored: () => void = () => {}
   private readonly renewSession: () => Promise<boolean>
@@ -84,6 +85,11 @@ export class HtmlAudioPlayer implements AudioPlayer {
     this.audio.load()
   }
 
+  setRate(rate: number): void {
+    this.rate = rate
+    this.applyRate()
+  }
+
   async unlock(): Promise<void> {
     const url = silentWavUrl()
     this.audio.src = url
@@ -95,8 +101,16 @@ export class HtmlAudioPlayer implements AudioPlayer {
     this.preloader.src = src
   }
 
+  private applyRate(): void {
+    // A new source resets playbackRate to defaultPlaybackRate, so both are set.
+    this.audio.defaultPlaybackRate = this.rate
+    this.audio.playbackRate = this.rate
+    this.audio.preservesPitch = true
+  }
+
   private async start(src: string): Promise<void> {
     this.audio.src = src
+    this.applyRate()
     await this.audio.play()
     this.playing = true
   }

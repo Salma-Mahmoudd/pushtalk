@@ -77,12 +77,12 @@ Generators create the standard files; the structure that is specific to this pro
 | 0.3b | `docker-compose.yml` with postgres + redis (health checks, volumes, Redis append-only file); `docker-compose.dev.yml` publishes them on `127.0.0.1:5433` and `127.0.0.1:6380` | both services `healthy`, reachable from the host |
 | 0.3c | ruff + **mypy --strict** on `src/`, `tsc --noEmit` strict + eslint on web; `make lint` runs all of them | clean from the first commit |
 | 0.4 | SQLAlchemy async engine/session dependency, `alembic init -t async migrations`, empty baseline migration | `alembic upgrade head` OK |
-| 0.5 | Celery app (`pushtalk.worker.celery_app`): Redis broker, queues `audio` + `transcribe`, `acks_late`, `reject_on_worker_lost`, prefetch 1; a no-op task | worker logs the no-op task |
-| 0.6 | `Dockerfile` for api (python:3.12-slim + ffmpeg + uv), targets `app` and `transcriber` | image builds |
+| 0.5 | Moved to Phase 3: the Celery app arrives with its first task, `process_message` (no no-op worker) | — |
+| 0.6 | `Dockerfile` for api (python:3.12-slim + uv, non-root, no dev tools); one image for `api` and the `migrate` job. ffmpeg is added in Phase 3, the `transcriber` target in Phase 5 | image builds |
 | 0.7 | `apps/web`: `pnpm create vite --template react-ts`, Tailwind + `shadcn init`, Zustand, TanStack Query, vitest, `ApiClient`, router shell, feature folders | `pnpm dev` shows page |
 | 0.8 | web `Dockerfile` (node build → nginx) + `nginx.conf` with WS upgrade | `/api/health` works via :8080 |
-| 0.9 | `docker-compose.yml`: postgres, redis, migrate, api, worker, transcriber (no-op until Phase 5C), flower, web, with healthchecks (minio + minio-init join in Phase 3) | **fresh clone → `docker compose up` → app on :8080, Flower on :5555** |
-| 0.10 | `docker-compose.dev.yml`: bind mounts, `uvicorn --reload`, Celery restarted on change (`watchfiles`), Vite dev server :5173 proxying `/api` and `/ws` (minio console :9001 from Phase 3); `make dev` | edit a file → reload |
+| 0.9 | `docker-compose.yml`: postgres, redis, migrate, api, web, with healthchecks and start order. worker + flower join in Phase 3, minio + minio-init in Phase 3, transcriber in Phase 5 | **fresh clone → `docker compose up` → app on :8080** |
+| 0.10 | `docker-compose.dev.yml`: PostgreSQL/Redis on `127.0.0.1:5433`/`6380`, API with `uvicorn --reload` on `127.0.0.1:8001`; `pnpm dev` (:5173) proxies `/api` to it. Celery reload (`watchfiles`) and the minio console join in Phase 3; `make dev` | edit a file → reload |
 
 ### Phase 1–5
 
@@ -90,7 +90,7 @@ Feature work lives in [`../auth/plan.md`](../auth/plan.md) and [`../chat/plan.md
 
 - P1: `get_current_user` (cookie) becomes the standard auth guard; refresh rotation and logout publish `session.revoked`; the shared `RateLimiter` arrives with its first user, the login and signup limits.
 - P2: `EventBus` (Redis pub/sub) + `ConnectionManager` + `PresenceService`.
-- P3: `minio` + `minio-init` compose services; `ObjectStorage` + `ffmpeg` infra modules and their health checks; `process_message` Celery task with retries.
+- P3: `minio` + `minio-init` compose services; `ObjectStorage` + `ffmpeg` infra modules and their health checks; Celery app (Redis broker, queues `audio` + `transcribe`, `acks_late`, `reject_on_worker_lost`, prefetch 1) with `process_message` and retries; `worker` + `flower` compose services; ffmpeg in the API image.
 - P4: nginx `proxy_read_timeout 3600s` for WS; app-level ping every 25 s.
 - P5: `transcriber` Dockerfile target with the `base` model downloaded at build time and a `whisper-models` volume for other sizes; provider factory; `/ws/me` user socket; rate-limit rules in env.
 

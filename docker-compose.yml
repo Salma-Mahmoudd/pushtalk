@@ -1,12 +1,14 @@
 name: pushtalk
 
-# Shared by the API image's services (api, migrate): build and connection settings.
+# Shared by the API image's services (api, worker, flower, migrate): build and settings.
 x-api: &api
   build: ./apps/api
   image: pushtalk-api
   environment:
     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-pushtalk}:${POSTGRES_PASSWORD:-pushtalk}@postgres:5432/${POSTGRES_DB:-pushtalk}
     REDIS_URL: redis://redis:6379/0
+    CELERY_BROKER_URL: redis://redis:6379/1
+    MEDIA_DIR: /data/media
     LOG_LEVEL: ${LOG_LEVEL:-INFO}
     LOG_FORMAT: ${LOG_FORMAT:-json}
     ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080,http://localhost:5173}
@@ -53,6 +55,8 @@ services:
 
   api:
     <<: *api
+    volumes:
+      - media:/data/media
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -67,6 +71,33 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # Processes voice messages (ffmpeg) from the "audio" queue.
+  worker:
+    <<: *api
+    command: ["celery", "-A", "pushtalk.worker.celery_app", "worker", "-Q", "audio", "--concurrency", "2", "--loglevel", "INFO"]
+    volumes:
+      - media:/data/media
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Celery dashboard: tasks, retries, failures. Localhost only, behind basic auth.
+  flower:
+    <<: *api
+    command: ["celery", "-A", "pushtalk.worker.celery_app", "flower", "--port=5555"]
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/1
+      FLOWER_BASIC_AUTH: ${FLOWER_BASIC_AUTH:-admin:pushtalk-dev}
+    ports:
+      - "127.0.0.1:${FLOWER_PORT:-5555}:5555"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   web:
     build: ./apps/web
     ports:
@@ -79,3 +110,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  media:

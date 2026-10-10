@@ -14,6 +14,7 @@ Run from `apps/api/` (uv and Python versions: see [`../../steps/environment-setu
 | `uv run pytest -m "not integration"` | Unit tests only, no services needed |
 | `uv run alembic upgrade head` | Apply database migrations |
 | `uv run alembic revision --autogenerate -m "add users"` | Create a migration from model changes |
+| `uv run celery -A pushtalk.worker.celery_app worker -Q audio` | Worker for voice messages (needs ffmpeg and Redis) |
 | `uv run ruff check .` | Lint |
 | `uv run ruff format .` | Format |
 | `uv run mypy` | Strict type check of `src/` and `tests/` |
@@ -34,6 +35,12 @@ The API reads `DATABASE_URL` and `REDIS_URL` (defaults match those containers; s
 src/pushtalk/
   main.py         App factory (create_app): logging, error handlers, middleware, routers
   health.py       GET /api/health: checks PostgreSQL and Redis (503 + details if one is down)
+  messages/       Voice messages (see specs/chat/plan.md, Phase 3)
+    models.py     messages: status, seq, duration, waveform, file keys
+    service.py    Upload: membership, size, sniffed type, real duration, idempotent client id
+    processing.py Worker job: Opus/OGG, duration, waveform, seq, broadcast; failures tell the sender
+    router.py     Upload (202), history pages, protected audio (members only, Range support)
+  worker/         Celery app (Redis broker, queue "audio", acks late) and the retrying task
   channels/       Channels, membership and presence (see specs/chat/plan.md)
     models.py     channels, channel_members
     presence.py   Online users: one expiring Redis entry per connection
@@ -65,6 +72,8 @@ src/pushtalk/
   infra/
     redis.py      Async Redis client
     rate_limit.py Redis sliding-window rate limiter (429 + Retry-After)
+    storage.py    Media files on disk (a Docker volume shared by api and worker)
+    audio.py      ffprobe/ffmpeg: type sniffing, real duration, Opus conversion, waveform peaks
 migrations/       Alembic (async template); env.py reads DATABASE_URL
 tests/            pytest suite; database tests use a migrated `pushtalk_test` database
                   (each test rolled back) and are skipped when PostgreSQL is not running

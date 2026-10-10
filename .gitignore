@@ -35,6 +35,7 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Logs and local data
+# Logs and local data (media of a locally run API: apps/api/var/)
 *.log
 data/
+var/

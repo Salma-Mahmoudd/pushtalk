@@ -20,9 +20,12 @@ from pushtalk.core.middleware import OriginCheckMiddleware, RequestContextMiddle
 from pushtalk.db.session import create_engine
 from pushtalk.infra.rate_limit import RateLimiter
 from pushtalk.infra.redis import create_redis
+from pushtalk.infra.storage import FileStorage
+from pushtalk.messages.router import router as messages_router
 from pushtalk.realtime.manager import ConnectionManager
 from pushtalk.realtime.router import router as realtime_router
 from pushtalk.realtime.sweeper import sweep_presence_forever
+from pushtalk.worker.celery_app import enqueue_message_processing
 
 log = structlog.get_logger(__name__)
 
@@ -66,6 +69,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # expire_on_commit=False: objects stay readable after commit, e.g. to build a response.
     application.state.sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     attach_redis(application, redis)
+    application.state.storage = FileStorage(settings.media_dir)
+    application.state.enqueue = enqueue_message_processing
     application.state.health_checks = health.dependency_checks(engine, redis)
 
     register_error_handlers(application)
@@ -76,6 +81,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(health.router)
     application.include_router(auth_router)
     application.include_router(channels_router)
+    application.include_router(messages_router)
     application.include_router(realtime_router)
     return application
 

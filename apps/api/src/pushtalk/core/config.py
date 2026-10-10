@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field, PostgresDsn, RedisDsn, SecretStr, field_validator
@@ -32,6 +33,14 @@ class Settings(BaseSettings):
     rate_limit_login_username: RateLimitSetting = "10/900"
     rate_limit_login_ip: RateLimitSetting = "30/900"
     rate_limit_signup_ip: RateLimitSetting = "5/3600"
+
+    # Voice messages. Media is stored on disk (a Docker volume shared by api and worker).
+    media_dir: Path = Path("var/media")
+    max_upload_bytes: int = 10 * 1024 * 1024
+    min_duration_ms: int = 500
+    max_duration_ms: int = 60_000
+    # Celery broker (Redis database 1, apart from pub/sub and presence in database 0).
+    celery_broker_url: RedisDsn = RedisDsn("redis://localhost:6380/1")
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["json", "console"] = "json"

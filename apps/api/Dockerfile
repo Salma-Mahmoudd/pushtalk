@@ -1,4 +1,4 @@
-# One image for the API and the one-off migration job (different commands in compose).
+# One image for the API, the Celery worker, Flower and the one-off migration job.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -9,6 +9,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.22 /uv /bin/uv
+# ffmpeg and ffprobe as static binaries (Opus included): upload checks and audio processing.
+COPY --from=mwader/static-ffmpeg:9.0.2 /ffmpeg /ffprobe /usr/local/bin/
 
 WORKDIR /app
 
@@ -23,7 +25,9 @@ COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
-RUN useradd --system --uid 10001 --no-create-home pushtalk
+# The media folder is created here so a new Docker volume starts owned by the app user.
+RUN useradd --system --uid 10001 --no-create-home pushtalk \
+    && mkdir -p /data/media && chown pushtalk /data/media
 USER pushtalk
 
 EXPOSE 8000

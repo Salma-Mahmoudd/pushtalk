@@ -1,6 +1,6 @@
 # Development additions, used together with docker-compose.yml:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
-# Publishes the services on localhost only and reloads the API on code changes.
+# Publishes the services on localhost only and reloads the API and worker on code changes.
 services:
   postgres:
     ports:
@@ -17,3 +17,10 @@ services:
       - ./apps/api/src:/app/src:ro
     ports:
       - "127.0.0.1:${API_HOST_PORT:-8001}:8000"
+
+  worker:
+    # Restarted by watchfiles whenever the API source changes.
+    command: ["watchfiles", "--filter", "python", "celery -A pushtalk.worker.celery_app worker -Q audio --concurrency 2 --loglevel INFO", "/app/src"]
+    volumes:
+      - ./apps/api/src:/app/src:ro
+      - media:/data/media

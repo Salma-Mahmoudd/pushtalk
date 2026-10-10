@@ -2,5 +2,6 @@
 
 from pushtalk.auth.models import RefreshToken, User
 from pushtalk.channels.models import Channel, ChannelMember
+from pushtalk.messages.models import Message
 
-__all__ = ["Channel", "ChannelMember", "RefreshToken", "User"]
+__all__ = ["Channel", "ChannelMember", "Message", "RefreshToken", "User"]

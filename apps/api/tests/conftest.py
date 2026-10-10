@@ -1,5 +1,7 @@
+import uuid
 from collections.abc import AsyncIterator, Callable
 from http import HTTPStatus
+from pathlib import Path
 
 import pytest
 from fakeredis import FakeAsyncRedis
@@ -11,6 +13,7 @@ from sqlalchemy.pool import NullPool
 
 from pushtalk.core.config import Settings
 from pushtalk.core.errors import AppError
+from pushtalk.infra.storage import FileStorage
 from pushtalk.main import attach_redis, create_app
 from tests.db import prepare_test_database
 
@@ -124,12 +127,33 @@ def fake_redis() -> FakeAsyncRedis:
 
 
 @pytest.fixture
+def storage(tmp_path: Path) -> FileStorage:
+    return FileStorage(tmp_path / "media")
+
+
+@pytest.fixture
+def enqueued() -> list[uuid.UUID]:
+    """Message ids the API queued for processing (no broker in tests)."""
+    return []
+
+
+@pytest.fixture
 async def db_app(
-    app: FastAPI, db_sessionmaker: async_sessionmaker[AsyncSession], fake_redis: FakeAsyncRedis
+    app: FastAPI,
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+    fake_redis: FakeAsyncRedis,
+    storage: FileStorage,
+    enqueued: list[uuid.UUID],
 ) -> AsyncIterator[FastAPI]:
-    """The test app on the test database, with an in-memory Redis."""
+    """The test app on the test database, with an in-memory Redis and a temporary media folder."""
     app.state.sessionmaker = db_sessionmaker
     attach_redis(app, fake_redis)
+    app.state.storage = storage
+
+    async def enqueue(message_id: uuid.UUID) -> None:
+        enqueued.append(message_id)
+
+    app.state.enqueue = enqueue
     yield app
     await app.state.connections.close()
 

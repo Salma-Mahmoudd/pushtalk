@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,3 +66,14 @@ class ChannelRepository:
             .order_by(User.username)
         )
         return list(rows)
+
+    async def next_seq(self, channel_id: uuid.UUID) -> int:
+        """Takes the channel's next message number; the row lock serialises concurrent workers."""
+        seq = await self._session.scalar(
+            update(Channel)
+            .where(Channel.id == channel_id)
+            .values(last_seq=Channel.last_seq + 1)
+            .returning(Channel.last_seq)
+        )
+        assert seq is not None
+        return int(seq)

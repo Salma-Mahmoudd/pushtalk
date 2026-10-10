@@ -52,8 +52,11 @@ export function configureSession(sessionHooks: SessionHooks): void {
   hooks = sessionHooks
 }
 
-/** One refresh at a time: requests that fail together wait for the same refresh. */
-function refreshOnce(): Promise<boolean> {
+/**
+ * Renews the session through the auth feature. One refresh at a time: callers that need it
+ * together (failed requests, a WebSocket closed with 4401) wait for the same refresh.
+ */
+export function refreshOnce(): Promise<boolean> {
   if (!hooks) return Promise.resolve(false)
   refreshing ??= hooks.refresh().finally(() => {
     refreshing = null

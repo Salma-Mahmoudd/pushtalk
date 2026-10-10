@@ -40,10 +40,13 @@ src/
   app/                App level: router, session start-up, logged-in shell (header, log out)
   features/
     auth/             API calls, session store, refresh + tab sync, log-in/sign-up pages, route guards
-    channels/         Channel pages
+    channels/         Sidebar, browse/join, create dialog, channel room with live member presence
   shared/
     lib/api/          API client (cookies, error envelope → ApiError, one refresh for concurrent 401s)
                       and schema.d.ts, generated from the API (never edited by hand)
+    lib/ws/           WsClient: reconnect with backoff (0.5 s doubling to 30 s, ±20 %), at once when
+                      back online; refresh once on 4401, stop on 4403; ping every 25 s
+    hooks/            Shared hooks (useIsMobile)
     ui/               shadcn/ui components
     theme/            Light/dark/system provider and toggle
     brand/            Logo
@@ -54,6 +57,10 @@ Features import from `shared/`, never from each other's internals.
 ### Session handling
 
 Tokens live in httpOnly cookies and are never readable by JavaScript; the app only knows when the access cookie expires. `features/auth/session.ts` refreshes a minute before that, and the API client refreshes after any 401 and retries once. Tabs share one session: a Web Lock lets one tab refresh at a time, and a `BroadcastChannel` passes logins, refreshes and logouts to the other tabs.
+
+### Server data
+
+TanStack Query holds data from the API (channels, members); creating or joining a channel refreshes it, and a room refreshes its member list on `member.joined` events and after every reconnect. The cache is cleared when the session ends. Live state that only arrives over the WebSocket (who is online) stays in the room's hook.
 
 ## Configuration
 
